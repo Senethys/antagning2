@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Antagning.se Course Timeline",
+  "version": "1.0",
+  "description": "Adds visual timeline for courses on antagning.se",
+  "permissions": [
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.antagning.se/*"],
+      "css": ["timeline.css"],
+      "js": ["timeline.js"]
+    }
+  ]
+}

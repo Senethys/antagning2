@@ -1,0 +1,60 @@
+.course-timeline-container {
+    margin: 20px 0;
+    padding: 20px;
+    background-color: #f8f8f8;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    font-family: 'Open Sans, Helvetica, Arial, sans-serif';
+}
+
+.course-timeline-container * {
+    font-family: inherit;
+}
+
+.timeline-header {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.timeline {
+    position: relative;
+    height: 30px;
+    background-color: #e0e0e0;
+    border-radius: 15px;
+    margin: 20px 0;
+}
+
+.timeline-progress {
+    position: absolute;
+    height: 100%;
+    background-color: #4CAF50;
+    border-radius: 15px;
+    transition: width 0.3s ease;
+}
+
+.timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 14px;
+    color: #666;
+}
+
+.timeline-week {
+    position: absolute;
+    font-size: 12px;
+    top: -20px;
+    transform: translateX(-50%);
+    color: #333;
+}
+
+.timeline-details {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+    font-size: 14px;
+    color: #666;
+}
