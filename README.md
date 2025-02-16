@@ -8,7 +8,11 @@ This project contains a JavaScript extension that adds a timeline view to the An
 - **Term-Based Timeline Grids**: Automatically creates and manages timeline grids for each term based on course information.
 - **Dynamic Course Addition**: Courses are dynamically added to the timeline, which calculates their duration and visual position based on the course credit points (hp) and the studietakt (course pace).
 - **Legend and Week Indicators**: A legend at the bottom displays color-coded course progress, and week indicators map the timeline to academic weeks.
+
+
 ![image](https://github.com/user-attachments/assets/2ac20d6a-5346-4228-a7b4-ef0a204e5471)
+
+
 
 ## Usage
 
