@@ -5,6 +5,9 @@ class CourseTimeline {
     constructor() {
         console.log('CourseTimeline initialized');
         this.totalHPByTerm = {};
+        this.courseSchedulesByTerm = new Map();
+        this.studietaktViews = new Map();
+        this.fullTimeHpPerWeek = 1.5;
         this.currentDate = '2025-01-15T21:49:18+01:00';
         this.termInfo = {
             'VT': { start: 3, end: 23 },
@@ -148,14 +151,86 @@ class CourseTimeline {
             timelineGrid.style.gap = '10px';
             
             timelineContainer.appendChild(timelineGrid);
+            const studietaktView = this.createStudietaktView(termKey);
+            timelineContainer.appendChild(studietaktView);
             termSection.appendChild(timelineContainer);
             container.appendChild(termSection);
             
             this.timelineGrids.set(termKey, timelineGrid);
+            this.courseSchedulesByTerm.set(termKey, []);
             this.totalHPByTerm[termKey] = 0;
+            this.updateStudietaktSummary(termKey);
         }
         
         return this.timelineGrids.get(termKey);
+    }
+
+    createStudietaktView(termKey) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'studietakt-summary';
+        wrapper.id = `studietakt-summary-${termKey}`;
+        wrapper.style.marginTop = '15px';
+        wrapper.style.padding = '12px 15px';
+        wrapper.style.backgroundColor = '#ffffff';
+        wrapper.style.border = '1px solid #e0e0e0';
+        wrapper.style.borderRadius = '8px';
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+        wrapper.style.gap = '8px';
+        wrapper.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
+
+        const header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.alignItems = 'center';
+
+        const title = document.createElement('span');
+        title.textContent = 'Studietakt';
+        title.style.fontSize = '14px';
+        title.style.fontWeight = '600';
+        title.style.color = '#333';
+
+        const overall = document.createElement('span');
+        overall.className = 'studietakt-summary-overall';
+        overall.style.fontSize = '13px';
+        overall.style.color = '#333';
+        overall.textContent = 'Genomsnitt: 0% - 0 hp';
+
+        header.appendChild(title);
+        header.appendChild(overall);
+
+        const info = document.createElement('div');
+        info.className = 'studietakt-summary-info';
+        info.style.fontSize = '12px';
+        info.style.color = '#666';
+        info.textContent = 'Beräknat utifrån 30 hp på 20 veckor (1.5 hp/vecka = 100%).';
+
+        const empty = document.createElement('div');
+        empty.className = 'studietakt-summary-empty';
+        empty.style.fontSize = '12px';
+        empty.style.color = '#666';
+        empty.textContent = 'Inga valda kurser ännu.';
+
+        const periods = document.createElement('div');
+        periods.className = 'studietakt-summary-periods';
+        periods.style.display = 'none';
+        periods.style.flexDirection = 'column';
+        periods.style.gap = '6px';
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(info);
+        wrapper.appendChild(empty);
+        wrapper.appendChild(periods);
+
+        this.studietaktViews.set(termKey, {
+            container: wrapper,
+            overall,
+            info,
+            periods,
+            empty
+        });
+
+        return wrapper;
     }
 
     updateTotalHP(hp, termKey) {
@@ -265,6 +340,7 @@ class CourseTimeline {
         const courseId = courseElement.querySelector('button.toggleselection').getAttribute('data-id');
         const courseName = courseElement.querySelector('.headline4').textContent;
         const coursePoints = courseElement.querySelector('.universal_medium').textContent.split(',')[0].trim().replace(/[^\d.]/g, '');
+        const hpValue = parseFloat(coursePoints);
         const studietakt = this.extractStudietakt(courseElement);
         const startPeriod = this.extractStartPeriod(courseElement);
         
@@ -274,8 +350,8 @@ class CourseTimeline {
         }
 
         // Calculate course duration and position
-        const duration = this.calculateCourseDuration(parseFloat(coursePoints), studietakt);
-        const { startPosition, width } = this.calculateTimelinePosition(startPeriod, duration, this.termInfo[term]);
+        const durationWeeks = this.calculateCourseDuration(hpValue, studietakt);
+        const { startPosition, width } = this.calculateTimelinePosition(startPeriod, durationWeeks, this.termInfo[term]);
         
         // Check if course extends beyond term end
         const isOverflowing = (startPosition + width) > 100;
@@ -334,7 +410,17 @@ class CourseTimeline {
         timelineGrid.appendChild(courseBar);
         
         // Update total HP for the term
-        this.updateTotalHP(this.totalHPByTerm[termKey] + parseFloat(coursePoints), termKey);
+        this.storeCourseSchedule(termKey, {
+            id: courseId,
+            name: courseName,
+            hp: hpValue,
+            studietakt,
+            startWeek: startPeriod,
+            durationWeeks,
+            endWeek: startPeriod + durationWeeks - 1
+        });
+        this.updateTotalHP(this.totalHPByTerm[termKey] + hpValue, termKey);
+        this.updateStudietaktSummary(termKey);
     }
 
     extractTermInfo(courseElement) {
@@ -452,6 +538,199 @@ class CourseTimeline {
         };
     }
 
+    storeCourseSchedule(termKey, courseData) {
+        const schedules = this.courseSchedulesByTerm.get(termKey) || [];
+        const existingIndex = schedules.findIndex(course => course.id === courseData.id);
+        
+        if (existingIndex !== -1) {
+            schedules[existingIndex] = courseData;
+        } else {
+            schedules.push(courseData);
+        }
+
+        this.courseSchedulesByTerm.set(termKey, schedules);
+    }
+
+    removeCourseSchedule(termKey, courseId) {
+        const schedules = this.courseSchedulesByTerm.get(termKey);
+        if (!schedules) {
+            return;
+        }
+        const updatedSchedules = schedules.filter(course => course.id !== courseId);
+        this.courseSchedulesByTerm.set(termKey, updatedSchedules);
+    }
+
+    getCourseSchedules(termKey) {
+        return this.courseSchedulesByTerm.get(termKey) || [];
+    }
+
+    updateStudietaktSummary(termKey) {
+        let view = this.studietaktViews.get(termKey);
+        if (!view) {
+            const timelineGrid = this.timelineGrids.get(termKey);
+            if (timelineGrid && timelineGrid.parentElement) {
+                const newView = this.createStudietaktView(termKey);
+                timelineGrid.parentElement.appendChild(newView);
+                view = this.studietaktViews.get(termKey);
+            } else {
+                return;
+            }
+        }
+
+        const { overall, periods, empty } = view;
+        const termCode = termKey.slice(0, 2);
+        const termConfig = this.termInfo[termCode];
+
+        if (!termConfig) {
+            overall.textContent = 'Genomsnitt: 0% - 0 hp';
+            periods.innerHTML = '';
+            periods.style.display = 'none';
+            empty.style.display = 'block';
+            empty.textContent = 'Kan inte räkna ut studietakten för den här terminen.';
+            return;
+        }
+
+        const courses = this.getCourseSchedules(termKey).filter(course => course.durationWeeks > 0);
+        if (!courses.length) {
+            overall.textContent = 'Genomsnitt: 0% - 0 hp';
+            periods.innerHTML = '';
+            periods.style.display = 'none';
+            empty.style.display = 'block';
+            empty.textContent = 'Inga valda kurser ännu.';
+            return;
+        }
+
+        const analysisStart = termConfig.start;
+        const analysisEnd = termConfig.end;
+        const termWeeks = analysisEnd - analysisStart + 1;
+        const termFullTimeHp = this.fullTimeHpPerWeek * termWeeks;
+
+        const loadChanges = new Map();
+        let hasOverlap = false;
+
+        courses.forEach(course => {
+            const overlapStart = Math.max(course.startWeek, analysisStart);
+            const overlapEnd = Math.min(course.endWeek, analysisEnd);
+            if (overlapStart > overlapEnd) {
+                return;
+            }
+            hasOverlap = true;
+            const weeklyRate = course.hp / course.durationWeeks;
+            loadChanges.set(overlapStart, (loadChanges.get(overlapStart) || 0) + weeklyRate);
+            const endMarker = overlapEnd + 1;
+            loadChanges.set(endMarker, (loadChanges.get(endMarker) || 0) - weeklyRate);
+        });
+
+        if (!hasOverlap) {
+            overall.textContent = 'Genomsnitt: 0% - 0 hp';
+            periods.innerHTML = '';
+            periods.style.display = 'none';
+            empty.style.display = 'block';
+            empty.textContent = 'Kurserna ligger utanför den här terminen.';
+            return;
+        }
+
+        loadChanges.set(analysisStart, (loadChanges.get(analysisStart) || 0));
+        loadChanges.set(analysisEnd + 1, (loadChanges.get(analysisEnd + 1) || 0));
+
+        const sortedWeeks = Array.from(loadChanges.keys())
+            .filter(week => week >= analysisStart && week <= analysisEnd + 1)
+            .sort((a, b) => a - b);
+
+        let currentLoad = 0;
+        const segments = [];
+
+        for (let i = 0; i < sortedWeeks.length - 1; i++) {
+            const week = sortedWeeks[i];
+            currentLoad += loadChanges.get(week) || 0;
+            const nextWeek = sortedWeeks[i + 1];
+            const segmentStart = week;
+            const segmentEnd = Math.min(nextWeek - 1, analysisEnd);
+            if (segmentEnd < segmentStart) {
+                continue;
+            }
+            const weeksInSegment = segmentEnd - segmentStart + 1;
+            if (weeksInSegment <= 0) {
+                continue;
+            }
+            const totalHp = currentLoad * weeksInSegment;
+            const fullTimeHp = this.fullTimeHpPerWeek * weeksInSegment;
+            const percentRaw = fullTimeHp > 0 ? (totalHp / fullTimeHp) * 100 : 0;
+            const percent = Math.round(percentRaw * 10) / 10;
+            const totalHpRounded = Math.round(totalHp * 10) / 10;
+            const fullTimeHpRounded = Math.round(fullTimeHp * 10) / 10;
+            const weeklyLoadRounded = Math.round(currentLoad * 100) / 100;
+            segments.push({
+                startWeek: segmentStart,
+                endWeek: segmentEnd,
+                weeks: weeksInSegment,
+                percent,
+                totalHp: totalHpRounded,
+                fullTimeHp: fullTimeHpRounded,
+                weeklyLoad: weeklyLoadRounded
+            });
+        }
+
+        const totalHpInTerm = segments.reduce((sum, segment) => sum + segment.totalHp, 0);
+        const avgPercentRaw = termFullTimeHp > 0 ? (totalHpInTerm / termFullTimeHp) * 100 : 0;
+        const avgPercent = Math.round(avgPercentRaw * 10) / 10;
+
+        overall.textContent = `Genomsnitt: ${this.formatNumber(avgPercent)}% - ${this.formatNumber(totalHpInTerm)} hp`;
+
+        periods.innerHTML = '';
+        periods.style.display = 'flex';
+        empty.style.display = 'none';
+
+        segments.forEach(segment => {
+            if (Math.abs(segment.totalHp) < 0.001) {
+                return;
+            }
+
+            const row = document.createElement('div');
+            row.className = 'studietakt-summary-row';
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.alignItems = 'baseline';
+            row.style.gap = '12px';
+
+            const label = document.createElement('span');
+            label.style.fontSize = '13px';
+            label.style.color = '#333';
+            label.textContent = `${this.formatWeekRange(segment.startWeek, segment.endWeek)} (${segment.weeks} v)`;
+
+            const value = document.createElement('span');
+            value.style.fontSize = '13px';
+            value.style.color = '#333';
+            value.textContent = `${this.formatNumber(segment.percent)}% - ${this.formatNumber(segment.weeklyLoad, 2)} hp/v (${this.formatNumber(segment.totalHp)} av ${this.formatNumber(segment.fullTimeHp)} hp)`;
+
+            row.appendChild(label);
+            row.appendChild(value);
+            periods.appendChild(row);
+        });
+
+        if (!periods.hasChildNodes()) {
+            periods.style.display = 'none';
+            empty.style.display = 'block';
+            empty.textContent = 'Ingen studietakt inom den här terminen.';
+        }
+    }
+
+    formatWeekRange(startWeek, endWeek) {
+        if (startWeek === endWeek) {
+            return `v.${startWeek}`;
+        }
+        return `v.${startWeek}-${endWeek}`;
+    }
+
+    formatNumber(value, decimals = 1) {
+        const factor = Math.pow(10, decimals);
+        const rounded = Math.round(value * factor) / factor;
+        if (Math.abs(rounded - Math.round(rounded)) < 0.5 / factor) {
+            return Math.round(rounded).toString();
+        }
+        return rounded.toFixed(decimals);
+    }
+
     findCourseElement(element) {
         // Try to find the course container by walking up the DOM
         let current = element;
@@ -508,9 +787,17 @@ class CourseTimeline {
         if (timelineItem) {
             console.log('Removing course from timeline');
             const coursePoints = courseElement.querySelector('.universal_medium').textContent.split(',')[0].trim().replace(/[^\d.]/g, '');
+            const hpValue = parseFloat(coursePoints);
             const { term, year } = this.extractTermInfo(courseElement);
-            const termKey = `${term}${year}`;
-            this.updateTotalHP(this.totalHPByTerm[termKey] - parseFloat(coursePoints), termKey);
+            if (term && year) {
+                const termKey = `${term}${year}`;
+                this.removeCourseSchedule(termKey, courseId);
+                const updatedHp = Math.max(0, (this.totalHPByTerm[termKey] || 0) - hpValue);
+                this.updateTotalHP(updatedHp, termKey);
+                this.updateStudietaktSummary(termKey);
+            } else {
+                console.error('Missing term information when removing course');
+            }
             timelineItem.remove();
             if (expandText) {
                 expandText.textContent = 'Lägg till';
