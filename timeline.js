@@ -8,7 +8,7 @@ class CourseTimeline {
         this.courseSchedulesByTerm = new Map();
         this.studietaktViews = new Map();
         this.fullTimeHpPerWeek = 1.5;
-        this.currentDate = '2025-01-15T21:49:18+01:00';
+        this.currentDate = new Date().toISOString();
         this.termInfo = {
             'VT': { start: 3, end: 23 },
             'HT': { start: 36, end: 52 }
@@ -430,7 +430,7 @@ class CourseTimeline {
         // Try to find term and year from the course details
         const termMatch = courseDetails.match(/(Hösten|Våren)\s*(20\d{2})/);
         if (termMatch) {
-            term = termMatch[1] === 'Hösten' ? 'VT' : 'HT';
+            term = termMatch[1] === 'Hösten' ? 'HT' : 'VT';
             year = termMatch[2];
         } else {
             // If not found in text, try to extract from button ID
