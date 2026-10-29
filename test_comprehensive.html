@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Kurstidslinje — navigationstest</title>
+    <link rel="stylesheet" href="timeline.css">
+    <style>
+        body {margin: 0; background: #f1f4f6; color: #263238; font: 16px/1.5 system-ui; padding-bottom: 80px}
+        header {padding: 18px 30px; background: #173e50; color: white}
+        nav {display:flex; gap:12px; flex-wrap:wrap; margin:20px 0}
+        button {font:inherit; padding:8px 14px; cursor:pointer; border:1px solid #adb8bd; border-radius:5px; background:white}
+        main {max-width:900px; margin:24px auto; padding:0 20px}
+        .searchresultcard {padding:20px; border:1px solid #ccd6da; border-radius:8px; background:white; margin:18px 0}
+        .headline4 {margin:0 0 10px} .subtitle {font-weight:600} .contained-button {background:#dfedf1}
+    </style>
+</head>
+<body>
+    <header>Antagning.se — lokal testmiljö</header>
+    <main>
+        <h1>Kurstidslinje: navigationstest</h1>
+        <p>Lägg till en kurs, byt sida och ladda om. Öppna panelen längst ned för att se tidslinjen. Alla val på den här sidan är lokala testdata.</p>
+        <nav aria-label="Testsidor">
+            <button data-page="search">Sökresultat</button><button data-page="selections">Mina val</button>
+            <button data-page="other">Annan sida</button><button id="remove-panel">Återskapa panel</button>
+        </nav>
+        <div id="site-content"></div>
+    </main>
+    <script>
+        const samples = [
+            {code:'KAU-49454', name:'1700-talslitteratur', hp:'7,5', pace:25, start:3, end:22},
+            {code:'UU-05025', name:'1800-talsromanen', hp:'7,5', pace:50, start:3, end:12}
+        ];
+        const selected = new Set(JSON.parse(localStorage.getItem('timelineDemoSelections') || '[]'));
+        const content = document.getElementById('site-content');
+        function renderCard(course) {
+            const chosen = selected.has(course.code);
+            return `<div class="searchresultcard"><h3 class="headline4">${course.name}</h3>
+                <div class="education-block-tags">Kurs ${course.hp} hp Studietakt ${course.pace} %</div>
+                <div><span class="subtitle">Startperiod: </span>Våren 2027 Period 1</div>
+                <div><span class="subtitle">Startvecka: </span>Vecka ${course.start}</div>
+                <div><span class="subtitle">Slutvecka: </span>Vecka ${course.end}</div>
+                <div><span class="subtitle">Studietakt: </span>${course.pace} %</div>
+                <div><span class="subtitle">Omfattning: </span>${course.hp} högskolepoäng</div>
+                <div><span class="subtitle">Anmälningskod: </span>${course.code}</div>
+                <utsokt-button-${chosen ? 'outlined class="remove-button"' : 'contained'}>
+                    <button data-code="${course.code}" class="${chosen ? 'outlined-button' : 'contained-button'}">${chosen ? 'Ta bort' : 'Lägg till'} ${course.name}</button>
+                </utsokt-button-${chosen ? 'outlined' : 'contained'}></div>`;
+        }
+        function renderPage() {
+            const page = new URLSearchParams(location.search).get('page') || 'search';
+            if (page === 'other') content.innerHTML = '<h2>Annan sida</h2><p>Inga kurskort visas. Tidslinjen behåller dina kurser.</p>';
+            else if (page === 'selections') {
+                content.innerHTML = `<a class="selectionstab" aria-current="page" href="?page=selections">Mina val <span class="dynamic-content">(${selected.size})</span></a>
+                    <section class="selections-page"><h2>Mina valda utbildningar</h2>${selected.size
+                        ? `<div class="selection-cards">${samples.filter(course=>selected.has(course.code)).map(renderCard).join('')}</div>`
+                        : '<div class="mina-val-emptystate">Inga valda utbildningar</div>'}</section>`;
+            } else content.innerHTML = '<h2>Sökresultat</h2>' + samples.map(renderCard).join('');
+        }
+        document.addEventListener('click', event => {
+            const button = event.target.closest('button');
+            if (button?.dataset.page) {
+                const routes = { search: '/se/search', selections: '/se/my/selections', other: '/se/start' };
+                history.pushState({}, '', routes[button.dataset.page] + '?page=' + button.dataset.page);
+                renderPage();
+            } else if (button?.dataset.code) {
+                const code = button.dataset.code;
+                if (selected.has(code)) selected.delete(code); else selected.add(code);
+                localStorage.setItem('timelineDemoSelections', JSON.stringify([...selected]));
+                renderPage();
+            } else if (button?.id === 'remove-panel') document.getElementById('course-timelines-container')?.remove();
+        });
+        window.addEventListener('popstate', renderPage);
+        renderPage();
+    </script>
+    <script src="timeline.js"></script>
+</body>
+</html>

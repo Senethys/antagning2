@@ -1,46 +1,46 @@
-# Antagning Timeline Extension
+# Antagning.se Course Timeline
 
-This project contains a JavaScript extension that adds a timeline view to the Antagning website. The timeline displays course information organized by academic terms, allowing users to see courses over the term period along with total credit points (hp) per term.
+A Chrome/Edge extension that keeps a course timeline visible while you move between Antagning.se search results, Mina val, and other pages.
 
-## Features
+## Install or reload
 
-- **Timeline Container Initialization**: Creates a dedicated container for the timeline display if one does not already exist.
-- **Term-Based Timeline Grids**: Automatically creates and manages timeline grids for each term based on course information.
-- **Dynamic Course Addition**: Courses are dynamically added to the timeline, which calculates their duration and visual position based on the course credit points (hp) and the studietakt (course pace).
-- **Legend and Week Indicators**: A legend at the bottom displays color-coded course progress, and week indicators map the timeline to academic weeks.
+1. Open `chrome://extensions` (Chrome) or `edge://extensions` (Edge).
+2. Enable Developer mode and use **Load unpacked** to select this folder.
+3. If the extension is already installed from this folder, click its **Reload** button.
+4. Refresh any Antagning.se tabs that were already open.
 
+The **Kurstidslinje** button at the bottom of the page opens the panel. Your expanded/collapsed preference is saved.
 
-![image](https://github.com/user-attachments/assets/2ac20d6a-5346-4228-a7b4-ef0a204e5471)
+## Behavior
 
+- Reads confirmed selections from the site's Add/Remove controls, including the current Angular components and older toggle buttons.
+- Reacts to DOM and navigation events; no polling timer or per-card event listeners.
+- Keeps off-page courses during searches, filters, route changes, and refreshes.
+- Removes a course when its card explicitly becomes unselected. A complete Mina val list can remove stale cached courses only when its selected-card count matches the site's count. The site's explicit empty state confirms an empty list; an initial empty loading list does not.
+- Uses the term plus application code as the identity, so the same code in different terms does not collide.
+- Restores the panel if the site replaces it and prevents duplicate startup.
+- Validates saved records and accepts the previous grouped storage format.
+- Saves course metadata in this browser's local storage for the current website origin. Browser storage events update other open tabs; this extension does not fetch the user's account or courses that have never been displayed.
 
+## Timeline estimates
 
-## Usage
+Explicit Startvecka and Slutvecka take priority. Otherwise, start period and credits/study pace estimate the schedule. Estimated rows are labeled **uppskattat**. Full time is modeled as 1.5 hp/week. Default overview boundaries are approximate: spring weeks 3–22, summer weeks 23–35, and autumn 20 weeks from week 36, continuing into the next year. Actual course weeks are shown in each row and its tooltip; courses continuing past the overview have a striped ending.
 
-1. **Installation**
-   - Clone or download the project into your working directory.
+Unknown terms or insufficient schedule information are skipped instead of assigned an invented term.
 
-2. **Integration**
-   - This extension is designed to work on the Antagning website. It should be included via the website's manifest or as an injected script.
-   - The script calls `initializeTimeline` on page load to set up the timeline container and attach event listeners for course selection.
+## Development
 
-3. **Customization**
-   - The timeline behavior can be adjusted by modifying the parameters in the code, such as the term start/end weeks defined in the `termInfo` object.
-   - CSS styles for the timeline can be adjusted directly in the script or in accompanying style files if separated.
+- `manifest.json`: content-script registration; no extra extension permissions.
+- `timeline.js`: course parsing, validated persistence, synchronization, and rendering.
+- `timeline.css`: styles scoped to the panel.
+- `test_dom.js`: automated DOM/navigation regression checks.
+- `test_comprehensive.html`: interactive local demonstration.
 
-## Files
+Run the tests with Node.js 18 or newer:
 
-- **timeline.js**: Contains the main logic for initializing the timeline container, handling course additions, and updating the timeline grid with course details.
-- **README.md**: Provides an overview of the project, features, and usage instructions.
+```sh
+npm install
+npm test
+```
 
-## Troubleshooting
-
-- **Timeline Container Missing**: The script logs an error if the timeline container cannot be found. Ensure that the target element exists on the page or adjust the selector in `initializeTimelineContainer`.
-- **Term Information Extraction**: If courses are not appearing correctly, check that the term and year extraction logic in `extractTermInfo` matches the website's course details format.
-
-## Contributing
-
-Feel free to fork this repository and submit pull requests. Any improvements on error handling, performance optimizations, or feature enhancements are welcome.
-
-## License
-
-This project is for internal use. If redistributed, please ensure proper credit is provided.
+To open the local demonstration with working navigation and storage, serve this directory with a local HTTP server and open `test_comprehensive.html`. No browser extension is required for the demonstration.

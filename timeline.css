@@ -1,60 +1,60 @@
-.course-timeline-container {
-    margin: 20px 0;
-    padding: 20px;
-    background-color: #f8f8f8;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    font-family: 'Open Sans, Helvetica, Arial, sans-serif';
+/* Keep every rule scoped to the extension panel. */
+#course-timelines-container {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 2147483647;
+    color: #263238;
+    background: #f8f8f8;
+    border-top: 1px solid #d6d6d6;
+    box-shadow: 0 -2px 8px #0002;
+    font: 14px/1.5 'Open Sans', Helvetica, Arial, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-
-.course-timeline-container * {
-    font-family: inherit;
-}
-
-.timeline-header {
-    font-size: 16px;
-    font-weight: bold;
-    margin-bottom: 15px;
-    color: #333;
-}
-
-.timeline {
-    position: relative;
-    height: 30px;
-    background-color: #e0e0e0;
-    border-radius: 15px;
-    margin: 20px 0;
-}
-
-.timeline-progress {
-    position: absolute;
-    height: 100%;
-    background-color: #4CAF50;
-    border-radius: 15px;
-    transition: width 0.3s ease;
-}
-
-.timeline-labels {
+#course-timelines-container *, #course-timelines-container *::before,
+#course-timelines-container *::after { box-sizing: border-box; }
+#course-timelines-container [hidden] { display: none !important; }
+#course-timelines-container .timeline-toggle {
     display: flex;
-    justify-content: space-between;
-    margin-top: 10px;
-    font-size: 14px;
-    color: #666;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    border: 0;
+    padding: 12px 20px;
+    margin: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
 }
-
-.timeline-week {
-    position: absolute;
-    font-size: 12px;
-    top: -20px;
-    transform: translateX(-50%);
-    color: #333;
+#course-timelines-container .timeline-toggle:focus-visible { outline: 3px solid #176b96; outline-offset: -3px; }
+#course-timelines-container .timeline-title { font-weight: 600; }
+#course-timelines-container .timeline-count { color: #555; }
+#course-timelines-container .timeline-toggle-icon { margin-left: auto; }
+#course-timelines-container .timeline-body {
+    max-height: min(55vh, 420px);
+    overflow: auto;
+    padding: 0 20px 16px;
+    overscroll-behavior: contain;
 }
-
-.timeline-details {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px solid #e0e0e0;
-    font-size: 14px;
-    color: #666;
+#course-timelines-container .timeline-empty { margin: 8px 0; }
+#course-timelines-container .timeline-note { color: #555; font-size: 12px; margin: 6px 0 12px; }
+#course-timelines-container .timeline-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }
+#course-timelines-container .timeline-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+#course-timelines-container .timeline-swatch { width: 20px; height: 10px; border-radius: 3px; }
+#course-timelines-container .timeline-term { margin: 16px 0; }
+#course-timelines-container .timeline-term-header,
+#course-timelines-container .timeline-load-heading,
+#course-timelines-container .timeline-load-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+#course-timelines-container h3 { margin: 0; color: inherit; font: 600 16px/1.5 'Open Sans', Helvetica, Arial, sans-serif; }
+#course-timelines-container .timeline-weeks { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin: 8px 0; }
+#course-timelines-container .course-timeline-item { position: relative; height: 32px; background: #e8e8e8; border-radius: 4px; margin: 6px 0; overflow: hidden; }
+#course-timelines-container .course-progress { position: absolute; height: 100%; border-radius: 4px; opacity: .6; }
+#course-timelines-container .timeline-overflow::after { content: ''; position: absolute; right: 0; width: 20px; height: 100%; background: repeating-linear-gradient(45deg, #333, #333 2px, transparent 2px, transparent 4px); }
+#course-timelines-container .course-label { position: relative; display: block; padding: 5px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+#course-timelines-container .timeline-load { margin-top: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 6px; background: white; }
+#course-timelines-container .timeline-load-row { font-size: 12px; margin: 4px 0; }
+@media (max-width: 600px) {
+    #course-timelines-container .timeline-toggle { padding: 10px 12px; }
+    #course-timelines-container .timeline-body { padding: 0 12px 12px; }
 }

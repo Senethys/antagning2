@@ -1,857 +1,392 @@
-// Remove the CSS injection since it's handled by the manifest
-console.log('Timeline script loaded!');
+(() => {
+    'use strict';
 
-class CourseTimeline {
-    constructor() {
-        console.log('CourseTimeline initialized');
-        this.totalHPByTerm = {};
-        this.courseSchedulesByTerm = new Map();
-        this.studietaktViews = new Map();
-        this.fullTimeHpPerWeek = 1.5;
-        this.currentDate = new Date().toISOString();
-        this.termInfo = {
-            'VT': { start: 3, end: 23 },
-            'HT': { start: 36, end: 52 }
-        };
-        this.timelineGrids = new Map(); // Store timeline grids by term
-        this.initializeTimelineContainer();
+    // Content scripts can be injected again into the same document.
+    if (window.__antagningTimeline) return;
+    window.__antagningTimeline = { pending: true };
+
+    const STORAGE_KEY = 'antagningCourseTimelineData';
+    const PANEL_KEY = 'antagningCourseTimelineExpanded';
+    const PANEL_ID = 'course-timelines-container';
+    const CARD_SELECTOR = '.searchresultcard, .course-container';
+    const HP_PER_WEEK = 1.5;
+    const COLORS = new Map([[100, '#4caf50'], [75, '#26a69a'], [50, '#ffa726'],
+        [25, '#5c6bc0'], [20, '#7e57c2'], [10, '#ef5350']]);
+    const number = value => new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 2 }).format(value);
+    const text = element => element?.textContent.replace(/\s+/g, ' ').trim() || '';
+    const numeric = value => Number(value.replace(',', '.'));
+
+    function element(tag, className, content) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (content !== undefined) node.textContent = content;
+        return node;
     }
 
-    initializeTimelineContainer() {
-        console.log('Initializing timeline container');
-        
-        // First check if container already exists
-        let timelineContainer = document.getElementById('course-timelines-container');
-        if (timelineContainer) {
-            console.log('Timeline container already exists');
-            return;
-        }
+    function field(card, label) {
+        const subtitle = [...card.querySelectorAll('.subtitle')]
+            .find(node => text(node).replace(/:$/, '').trim().toLowerCase() === label.toLowerCase());
+        return subtitle ? text(subtitle.parentElement).slice(text(subtitle).length).trim() : '';
+    }
 
-        // Determine appropriate parent element
-        let parentElement;
-        if (window.location.href.indexOf('selections') !== -1) {
-            parentElement = document.body;
-        } else {
-            parentElement = document.querySelector('.resultsection') || 
-                            document.querySelector('#result_list_anchor') ||
-                            document.querySelector('#showfilterscontainer');
-        }
-        if (!parentElement) {
-            console.log('Could not find a suitable container, waiting for DOM...');
-            setTimeout(() => this.initializeTimelineContainer(), 500);
-            return;
-        }
+    function weeksInYear(year) {
+        const december28 = new Date(Date.UTC(Number(year), 11, 28));
+        const day = december28.getUTCDay() || 7;
+        december28.setUTCDate(december28.getUTCDate() + 4 - day);
+        return Math.ceil(((december28 - new Date(Date.UTC(december28.getUTCFullYear(), 0, 1))) / 86400000 + 1) / 7);
+    }
 
-        // Create the timeline container
-        timelineContainer = document.createElement('div');
-        timelineContainer.id = 'course-timelines-container';
-        timelineContainer.className = 'course-timelines-container';
-        timelineContainer.style.margin = '20px 0';
-        timelineContainer.style.padding = '20px';
-        timelineContainer.style.backgroundColor = '#f8f8f8';
-        timelineContainer.style.border = '1px solid #e0e0e0';
-        timelineContainer.style.borderRadius = '8px';
-        timelineContainer.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+    function termConfig(termKey) {
+        const start = { VT: 3, ST: 23, HT: 36 }[termKey.slice(0, 2)];
+        return { start, end: start + (termKey.startsWith('ST') ? 13 : 20) - 1 };
+    }
 
-        // Add legend at the top
-        this.addLegend(timelineContainer);
-        
-        // Insert the container in the appropriate place
-        if (parentElement.parentNode) {
-            try {
-                parentElement.parentNode.insertBefore(timelineContainer, parentElement);
-                console.log('Timeline container created and inserted');
-            } catch (error) {
-                console.error('Error inserting timeline container:', error);
-                // Fallback: try to append to the parent instead
-                try {
-                    parentElement.parentNode.appendChild(timelineContainer);
-                    console.log('Timeline container appended as fallback');
-                } catch (error) {
-                    console.error('Failed to insert timeline container:', error);
-                }
+    function weekLabel(week, termKey) {
+        const lastWeek = weeksInYear(termKey.slice(2));
+        return week > lastWeek ? `${week - lastWeek} (${Number(termKey.slice(2)) + 1})` : String(week);
+    }
+
+    function identity(card) {
+        const termText = field(card, 'Startperiod') || text(card);
+        const match = termText.match(/(Hösten|Våren|Sommar(?:en)?)\s*(20\d{2})/i)
+            || (card.querySelector('[data-id], button[id^="info-"]')?.getAttribute('data-id')
+                || card.querySelector('button[id^="info-"]')?.id || '').match(/(HT|VT|ST)(20\d{2})/);
+        const term = match && ({ hösten: 'HT', våren: 'VT', sommar: 'ST', sommaren: 'ST' }[match[1].toLowerCase()] || match[1]);
+        const code = field(card, 'Anmälningskod') || text(card).match(/Anmälningskod:\s*([\w-]+)/i)?.[1]
+            || card.querySelector('button.toggleselection[data-id]')?.dataset.id;
+        if (!term || !code) return null;
+        const termKey = `${term}${match[2]}`;
+        return { id: `${termKey}:${code}`, code, termKey };
+    }
+
+    function readCourse(card) {
+        const key = identity(card);
+        const name = text(card.querySelector('.headline4, h3, h2'));
+        // Read credits from the metadata, never from prerequisite prose.
+        const points = field(card, 'Omfattning') || text(card.querySelector('.education-block-tags, .universal_medium'));
+        const hpMatch = points.match(/(\d+(?:[.,]\d+)?)\s*(?:hp\b|högskolepoäng)/i);
+        if (!key || !name || !hpMatch) return null;
+        const hp = numeric(hpMatch[1]);
+        const paceText = field(card, 'Studietakt') || text(card.querySelector('.education-block-tags')) || text(card);
+        const paceWords = [['hel', 100], ['trekvarts', 75], ['halv', 50], ['kvarts', 25]];
+        const paceMatch = paceText.match(/(\d+(?:[.,]\d+)?)\s*%/);
+        let studietakt = paceMatch ? numeric(paceMatch[1]) : paceWords.find(([word]) => new RegExp(`${word}fart`, 'i').test(paceText))?.[1];
+        const config = termConfig(key.termKey);
+        const startText = field(card, 'Startvecka');
+        const startMatch = startText.match(/(?:Vecka\s*)?(\d{1,2})/i);
+        let startWeek = startMatch ? Number(startMatch[1])
+            : config.start + (/Period\s*2/i.test(field(card, 'Startperiod') || text(card)) ? 10 : 0);
+        const endMatch = field(card, 'Slutvecka').match(/(?:Vecka\s*)?(\d{1,2})/i);
+        let endWeek = endMatch ? Number(endMatch[1]) : null;
+        if (startMatch && (startWeek < 1 || startWeek > 53)) return null;
+        if (endMatch && (endWeek < 1 || endWeek > 53)) return null;
+        if (key.termKey.startsWith('HT')) {
+            const lastWeek = weeksInYear(key.termKey.slice(2));
+            if (startWeek < config.start) startWeek += lastWeek;
+            if (endWeek !== null && endWeek < startWeek) endWeek += lastWeek;
+        }
+        if (endWeek !== null && endWeek < startWeek) return null;
+        const durationWeeks = endWeek !== null ? endWeek - startWeek + 1
+            : studietakt > 0 ? Math.ceil(hp / HP_PER_WEEK * 100 / studietakt) : 0;
+        if (!studietakt && durationWeeks) studietakt = hp / durationWeeks / HP_PER_WEEK * 100;
+        const course = { ...key, name, hp, studietakt, startWeek, durationWeeks,
+            endWeek: startWeek + durationWeeks - 1, estimated: !startMatch || !endMatch };
+        return validCourse(course) ? course : null;
+    }
+
+    function validCourse(course) {
+        return course && /^(VT|HT|ST)20\d{2}$/.test(course.termKey)
+            && typeof course.code === 'string' && course.code.length > 0 && course.code.length < 200
+            && course.id === `${course.termKey}:${course.code}`
+            && typeof course.name === 'string' && course.name.trim().length > 0
+            && Number.isFinite(course.hp) && course.hp > 0
+            && Number.isFinite(course.studietakt) && course.studietakt > 0 && course.studietakt <= 100
+            && Number.isInteger(course.startWeek) && course.startWeek >= 1 && course.startWeek <= 106
+            && Number.isInteger(course.durationWeeks) && course.durationWeeks > 0 && course.durationWeeks <= 520
+            && course.endWeek === course.startWeek + course.durationWeeks - 1;
+    }
+
+    function decode(raw) {
+        const courses = new Map();
+        try {
+            const data = JSON.parse(raw || 'null');
+            if (!data || typeof data !== 'object') return courses;
+            const values = data.version === 2 && Array.isArray(data.courses) ? data.courses
+                : Object.entries(data).flatMap(([termKey, schedules]) => Array.isArray(schedules)
+                    ? schedules.map(course => ({ ...course, code: course.id, id: `${termKey}:${course.id}`, termKey, estimated: true })) : []);
+            for (const course of values) if (validCourse(course)) courses.set(course.id, course);
+        } catch { /* A corrupt cache must not prevent startup. */ }
+        return courses;
+    }
+
+    // true/false mean confirmed selected/unselected; null means no reliable signal.
+    function selectionState(card) {
+        const actions = new Set();
+        for (const button of card.querySelectorAll('button')) {
+            if (button.disabled || button.getAttribute('aria-disabled') === 'true' || button.closest('[hidden], [aria-hidden="true"], .hide')) continue;
+            let hidden = false;
+            for (let node = button; node; node = node.parentElement) {
+                const style = getComputedStyle(node);
+                if (style.display === 'none' || style.visibility === 'hidden') { hidden = true; break; }
             }
-        } else {
-            console.error('Could not find parent node for insertion');
+            if (hidden) continue;
+            const label = button.getAttribute('aria-label') || text(button.querySelector('.button-text')) || text(button);
+            if (button.matches('.toggleselection')) {
+                const removeLabel = button.querySelector('.contract-text');
+                const addLabel = button.querySelector('.expand-text');
+                if (removeLabel && addLabel) {
+                    const shown = node => !node.closest('.hide, [hidden], [aria-hidden="true"]') && getComputedStyle(node).display !== 'none';
+                    if (shown(removeLabel) !== shown(addLabel)) actions.add(shown(removeLabel));
+                } else if (/^Ta bort\b/i.test(label)) actions.add(true);
+                else if (/^Lägg till\b/i.test(label)) actions.add(false);
+            } else if (/^Ta bort\b/i.test(label)) actions.add(true);
+            else if (/^Lägg till\b/i.test(label)) actions.add(false);
         }
+        return actions.size === 1 ? [...actions][0] : null;
     }
 
-    getOrCreateTimelineForTerm(term, year) {
-        const termKey = `${term}${year}`;
-        const container = document.getElementById('course-timelines-container');
-        
-        if (!container) {
-            console.error('Timeline container not found');
-            return null;
-        }
-        
-        if (!this.timelineGrids.has(termKey)) {
-            console.log('Creating new timeline for term:', termKey);
-            
-            // Create term section
-            const termSection = document.createElement('div');
-            termSection.className = 'term-section';
-            termSection.style.marginBottom = '30px';
-            
-            // Add term header
-            const termHeader = document.createElement('div');
-            termHeader.className = 'term-header';
-            termHeader.style.marginBottom = '15px';
-            termHeader.style.display = 'flex';
-            termHeader.style.justifyContent = 'space-between';
-            termHeader.style.alignItems = 'center';
-            
-            const termTitle = document.createElement('h3');
-            termTitle.textContent = `${term} ${year}`;
-            termTitle.style.margin = '0';
-            termTitle.style.fontSize = '18px';
-            termTitle.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-            
-            const hpDisplay = document.createElement('div');
-            hpDisplay.id = `total-hp-display-${termKey}`;
-            hpDisplay.textContent = 'Totalt: 0 hp';
-            hpDisplay.style.fontSize = '14px';
-            hpDisplay.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-            
-            termHeader.appendChild(termTitle);
-            termHeader.appendChild(hpDisplay);
-            termSection.appendChild(termHeader);
-
-            // Create timeline container
-            const timelineContainer = document.createElement('div');
-            timelineContainer.className = 'timeline-container';
-            timelineContainer.style.backgroundColor = '#f8f8f8';
-            timelineContainer.style.padding = '15px';
-            timelineContainer.style.borderRadius = '8px';
-            
-            // Add week indicators
-            const weekIndicators = document.createElement('div');
-            weekIndicators.className = 'week-indicators';
-            weekIndicators.style.display = 'flex';
-            weekIndicators.style.justifyContent = 'space-between';
-            weekIndicators.style.padding = '0 20px';
-            weekIndicators.style.marginBottom = '10px';
-            weekIndicators.style.color = '#666';
-            weekIndicators.style.fontSize = '12px';
-            
-            const termConfig = this.termInfo[term];
-            for (let week = termConfig.start; week <= termConfig.end; week += 5) {
-                const indicator = document.createElement('span');
-                indicator.textContent = `v.${week}`;
-                weekIndicators.appendChild(indicator);
-            }
-            
-            timelineContainer.appendChild(weekIndicators);
-
-            // Add timeline grid
-            const timelineGrid = document.createElement('div');
-            timelineGrid.id = `timeline-grid-${termKey}`;
-            timelineGrid.style.display = 'flex';
-            timelineGrid.style.flexDirection = 'column';
-            timelineGrid.style.gap = '10px';
-            
-            timelineContainer.appendChild(timelineGrid);
-            const studietaktView = this.createStudietaktView(termKey);
-            timelineContainer.appendChild(studietaktView);
-            termSection.appendChild(timelineContainer);
-            container.appendChild(termSection);
-            
-            this.timelineGrids.set(termKey, timelineGrid);
-            this.courseSchedulesByTerm.set(termKey, []);
-            this.totalHPByTerm[termKey] = 0;
-            this.updateStudietaktSummary(termKey);
-        }
-        
-        return this.timelineGrids.get(termKey);
-    }
-
-    createStudietaktView(termKey) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'studietakt-summary';
-        wrapper.id = `studietakt-summary-${termKey}`;
-        wrapper.style.marginTop = '15px';
-        wrapper.style.padding = '12px 15px';
-        wrapper.style.backgroundColor = '#ffffff';
-        wrapper.style.border = '1px solid #e0e0e0';
-        wrapper.style.borderRadius = '8px';
-        wrapper.style.display = 'flex';
-        wrapper.style.flexDirection = 'column';
-        wrapper.style.gap = '8px';
-        wrapper.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-
-        const header = document.createElement('div');
-        header.style.display = 'flex';
-        header.style.justifyContent = 'space-between';
-        header.style.alignItems = 'center';
-
-        const title = document.createElement('span');
-        title.textContent = 'Studietakt';
-        title.style.fontSize = '14px';
-        title.style.fontWeight = '600';
-        title.style.color = '#333';
-
-        const overall = document.createElement('span');
-        overall.className = 'studietakt-summary-overall';
-        overall.style.fontSize = '13px';
-        overall.style.color = '#333';
-        overall.textContent = 'Genomsnitt: 0% - 0 hp';
-
-        header.appendChild(title);
-        header.appendChild(overall);
-
-        const info = document.createElement('div');
-        info.className = 'studietakt-summary-info';
-        info.style.fontSize = '12px';
-        info.style.color = '#666';
-        info.textContent = 'Beräknat utifrån 30 hp på 20 veckor (1.5 hp/vecka = 100%).';
-
-        const empty = document.createElement('div');
-        empty.className = 'studietakt-summary-empty';
-        empty.style.fontSize = '12px';
-        empty.style.color = '#666';
-        empty.textContent = 'Inga valda kurser ännu.';
-
-        const periods = document.createElement('div');
-        periods.className = 'studietakt-summary-periods';
-        periods.style.display = 'none';
-        periods.style.flexDirection = 'column';
-        periods.style.gap = '6px';
-
-        wrapper.appendChild(header);
-        wrapper.appendChild(info);
-        wrapper.appendChild(empty);
-        wrapper.appendChild(periods);
-
-        this.studietaktViews.set(termKey, {
-            container: wrapper,
-            overall,
-            info,
-            periods,
-            empty
-        });
-
-        return wrapper;
-    }
-
-    updateTotalHP(hp, termKey) {
-        this.totalHPByTerm[termKey] = hp;
-        const display = document.getElementById(`total-hp-display-${termKey}`);
-        if (display) {
-            display.textContent = `Totalt: ${hp} hp`;
-        }
-    }
-
-    addLegend(timelineContainer) {
-        // Add legend at the bottom
-        const legend = document.createElement('div');
-        legend.style.marginTop = '20px';
-        legend.style.padding = '10px';
-        legend.style.borderTop = '1px solid #e0e0e0';
-        legend.style.display = 'flex';
-        legend.style.flexWrap = 'wrap';
-        legend.style.gap = '15px';
-        legend.style.fontSize = '12px';
-        legend.style.color = '#666';
-        legend.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-
-        const legendItems = [
-            { color: '#4CAF50', text: '100%' },
-            { color: '#26A69A', text: '75%' },
-            { color: '#FFA726', text: '50%' },
-            { color: '#5C6BC0', text: '25%' },
-            { color: '#7E57C2', text: '20%' },
-            { color: '#EF5350', text: '10%' }
-        ];
-
-        legendItems.forEach(item => {
-            const legendItem = document.createElement('div');
-            legendItem.style.display = 'flex';
-            legendItem.style.alignItems = 'center';
-            legendItem.style.gap = '5px';
-
-            const colorBox = document.createElement('div');
-            colorBox.style.width = '20px';
-            colorBox.style.height = '10px';
-            colorBox.style.backgroundColor = item.color;
-            colorBox.style.borderRadius = '4px';
-
-            const text = document.createElement('span');
-            text.textContent = `Studietakt: ${item.text}`;
-            text.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-
-            legendItem.appendChild(colorBox);
-            legendItem.appendChild(text);
-            legend.appendChild(legendItem);
-        });
-
-        // Add overflow indicator to legend
-        const overflowLegend = document.createElement('div');
-        overflowLegend.style.display = 'flex';
-        overflowLegend.style.alignItems = 'center';
-        overflowLegend.style.gap = '5px';
-
-        const overflowBox = document.createElement('div');
-        overflowBox.style.width = '20px';
-        overflowBox.style.height = '10px';
-        overflowBox.style.backgroundImage = `repeating-linear-gradient(
-            45deg,
-            #666,
-            #666 2px,
-            #fff 2px,
-            #fff 4px
-        )`;
-        overflowBox.style.borderRadius = '4px';
-
-        const overflowText = document.createElement('span');
-        overflowText.textContent = 'Fortsätter efter terminsslut';
-        overflowText.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-
-        overflowLegend.appendChild(overflowBox);
-        overflowLegend.appendChild(overflowText);
-        legend.appendChild(overflowLegend);
-
-        timelineContainer.appendChild(legend);
-    }
-
-    addCourseToTimeline(courseElement) {
-        console.log('Adding course to timeline');
-        
-        // Extract term information
-        const { term, year } = this.extractTermInfo(courseElement);
-        console.log('Extracted term info:', term, year);
-        
-        if (!term || !year) {
-            console.error('Could not extract term info');
-            return;
+    class CourseTimeline {
+        constructor() {
+            this.courses = this.readStored();
+            this.expanded = this.readValue(PANEL_KEY) === 'true';
+            this.timer = null;
+            this.root = null;
+            this.storageFailed = false;
+            this.sync = this.sync.bind(this);
+            this.schedule = this.schedule.bind(this);
         }
 
-        // Get timeline grid for this term
-        const timelineGrid = this.getOrCreateTimelineForTerm(term, year);
-        if (!timelineGrid) {
-            console.error('Could not get timeline grid');
-            // Try to initialize the container again
-            this.initializeTimelineContainer();
-            return;
+        readValue(key) {
+            try { return localStorage.getItem(key); } catch { return null; }
         }
 
-        const termKey = `${term}${year}`;
-        
-        // Extract course information
-        const courseId = courseElement.querySelector('button.toggleselection').getAttribute('data-id');
-        const courseName = courseElement.querySelector('.headline4').textContent;
-        const coursePoints = courseElement.querySelector('.universal_medium').textContent.split(',')[0].trim().replace(/[^\d.]/g, '');
-        const hpValue = parseFloat(coursePoints);
-        const studietakt = this.extractStudietakt(courseElement);
-        const startPeriod = this.extractStartPeriod(courseElement);
-        
-        if (!startPeriod) {
-            console.error('Could not extract start period');
-            return;
-        }
+        readStored() { return decode(this.readValue(STORAGE_KEY)); }
 
-        // Calculate course duration and position
-        const durationWeeks = this.calculateCourseDuration(hpValue, studietakt);
-        const { startPosition, width } = this.calculateTimelinePosition(startPeriod, durationWeeks, this.termInfo[term]);
-        
-        // Check if course extends beyond term end
-        const isOverflowing = (startPosition + width) > 100;
-        const actualWidth = isOverflowing ? 100 - startPosition : width;
-
-        // Create course element
-        const courseBar = document.createElement('div');
-        courseBar.id = `timeline-${courseId}`;
-        courseBar.className = 'course-timeline-item';
-        courseBar.style.position = 'relative';
-        courseBar.style.height = '30px';
-        courseBar.style.backgroundColor = '#f0f0f0';
-        courseBar.style.borderRadius = '4px';
-        courseBar.style.marginBottom = '5px';
-        
-        // Create course progress bar
-        const progressBar = document.createElement('div');
-        progressBar.className = 'course-progress';
-        progressBar.style.position = 'absolute';
-        progressBar.style.left = startPosition + '%';
-        progressBar.style.width = actualWidth + '%';
-        progressBar.style.height = '100%';
-        progressBar.style.backgroundColor = this.getStudietaktColor(studietakt);
-        progressBar.style.borderRadius = '4px';
-        
-        // Add diagonal stripes pattern for courses that extend beyond term end
-        if (isOverflowing) {
-            const overflowBar = document.createElement('div');
-            overflowBar.style.position = 'absolute';
-            overflowBar.style.right = '0';
-            overflowBar.style.width = '30%';  // Show pattern on the right portion
-            overflowBar.style.height = '100%';
-            overflowBar.style.backgroundImage = 'repeating-linear-gradient(45deg, #666, #666 2px, transparent 2px, transparent 4px)';
-            overflowBar.style.borderRadius = '0 4px 4px 0';
-            progressBar.appendChild(overflowBar);
-        }
-        
-        // Add course label
-        const label = document.createElement('div');
-        label.className = 'course-label';
-        label.style.position = 'absolute';
-        label.style.left = '10px';
-        label.style.top = '50%';
-        label.style.transform = 'translateY(-50%)';
-        label.style.color = '#333';
-        label.style.fontSize = '12px';
-        label.style.whiteSpace = 'nowrap';
-        label.style.overflow = 'hidden';
-        label.style.textOverflow = 'ellipsis';
-        label.style.maxWidth = 'calc(100% - 20px)';
-        label.style.fontFamily = 'Open Sans, Helvetica, Arial, sans-serif';
-        label.textContent = `${courseName} (${coursePoints}hp)`;
-        
-        courseBar.appendChild(progressBar);
-        courseBar.appendChild(label);
-        timelineGrid.appendChild(courseBar);
-        
-        // Update total HP for the term
-        this.storeCourseSchedule(termKey, {
-            id: courseId,
-            name: courseName,
-            hp: hpValue,
-            studietakt,
-            startWeek: startPeriod,
-            durationWeeks,
-            endWeek: startPeriod + durationWeeks - 1
-        });
-        this.updateTotalHP(this.totalHPByTerm[termKey] + hpValue, termKey);
-        this.updateStudietaktSummary(termKey);
-    }
-
-    extractTermInfo(courseElement) {
-        const courseDetails = courseElement.textContent;
-        let term, year;
-
-        // Try to find term and year from the course details
-        const termMatch = courseDetails.match(/(Hösten|Våren)\s*(20\d{2})/);
-        if (termMatch) {
-            term = termMatch[1] === 'Hösten' ? 'HT' : 'VT';
-            year = termMatch[2];
-        } else {
-            // If not found in text, try to extract from button ID
-            const buttonId = courseElement.querySelector('button[id^="info-"]')?.id || '';
-            const buttonMatch = buttonId.match(/info-(HT|VT)(20\d{2})/);
-            
-            if (buttonMatch) {
-                term = buttonMatch[1];
-                year = buttonMatch[2];
-            } else {
-                // As a last resort, use current date to determine next possible term
-                const currentDate = new Date(this.currentDate);
-                const currentMonth = currentDate.getMonth() + 1; // 0-based
-                const currentYear = currentDate.getFullYear();
-                
-                // If we're in the application period for autumn (before January 15)
-                // or spring (before July 15), use the next term
-                if (currentMonth <= 1 || (currentMonth === 1 && currentDate.getDate() <= 15)) {
-                    // Application period for autumn term
-                    term = 'VT';
-                    year = currentYear.toString();
-                } else if (currentMonth <= 7 && (currentMonth < 7 || currentDate.getDate() <= 15)) {
-                    // Application period for spring term
-                    term = 'HT';
-                    year = currentYear.toString();
-                } else {
-                    // Application period for next year's spring term
-                    term = 'VT';
-                    year = (currentYear + 1).toString();
-                }
-            }
-        }
-
-        console.log(`Extracted term info: ${term} ${year}`);
-        return { term, year };
-    }
-
-    extractStartPeriod(courseElement) {
-        const courseDetails = courseElement.textContent;
-        const termInfo = this.extractTermInfo(courseElement);
-        const termConfig = this.termInfo[termInfo.term];
-        
-        // Check for specific period mentions
-        if (courseDetails.includes('Period 1')) {
-            return termConfig.start;
-        }
-        if (courseDetails.includes('Period 2')) {
-            return termConfig.start + 10;
-        }
-
-        // Look for explicit week number
-        const weekMatch = courseDetails.match(/[Vv]ecka (\d+)/);
-        if (weekMatch) {
-            const week = parseInt(weekMatch[1]);
-            // Validate that the week is within the term's range
-            if (week >= termConfig.start && week <= termConfig.end) {
-                return week;
-            }
-        }
-
-        // Default to term start if no specific information found
-        return termConfig.start;
-    }
-
-    extractStudietakt(courseElement) {
-        const courseDetails = courseElement.textContent;
-        if (courseDetails.includes('Helfart')) return 100;
-        if (courseDetails.includes('Trekvartsfart')) return 75;
-        if (courseDetails.includes('Halvfart')) return 50;
-        if (courseDetails.includes('Kvartsfart')) return 25;
-        // Try to find percentage if explicitly stated
-        const percentMatch = courseDetails.match(/(\d+)%/);
-        if (percentMatch) return parseInt(percentMatch[1]);
-        // Default to full-time if not specified
-        return 100;
-    }
-
-    calculateCourseDuration(hp, studietakt) {
-        // Base duration for full-time studies (1.5 hp per week)
-        const baseWeeks = hp / 1.5;
-        // Adjust duration based on studietakt (e.g., halvfart takes twice as long)
-        return Math.ceil(baseWeeks * (100 / studietakt));
-    }
-
-    getStudietaktColor(studietakt) {
-        switch (studietakt) {
-            case 100: return '#4CAF50';  // Green
-            case 75: return '#26A69A';   // Teal
-            case 50: return '#FFA726';   // Orange
-            case 25: return '#5C6BC0';   // Indigo
-            case 20: return '#7E57C2';   // Deep Purple
-            case 10: return '#EF5350';   // Red
-            default: return '#4CAF50';   // Default to green
-        }
-    }
-
-    calculateTimelinePosition(startWeek, duration, termConfig) {
-        const termLength = termConfig.end - termConfig.start;
-        let startPosition = ((startWeek - termConfig.start) / termLength) * 100;
-        let width = (duration / termLength) * 100;
-        
-        return {
-            startPosition: Math.max(0, startPosition),
-            width: Math.max(0, width)
-        };
-    }
-
-    storeCourseSchedule(termKey, courseData) {
-        const schedules = this.courseSchedulesByTerm.get(termKey) || [];
-        const existingIndex = schedules.findIndex(course => course.id === courseData.id);
-        
-        if (existingIndex !== -1) {
-            schedules[existingIndex] = courseData;
-        } else {
-            schedules.push(courseData);
-        }
-
-        this.courseSchedulesByTerm.set(termKey, schedules);
-    }
-
-    removeCourseSchedule(termKey, courseId) {
-        const schedules = this.courseSchedulesByTerm.get(termKey);
-        if (!schedules) {
-            return;
-        }
-        const updatedSchedules = schedules.filter(course => course.id !== courseId);
-        this.courseSchedulesByTerm.set(termKey, updatedSchedules);
-    }
-
-    getCourseSchedules(termKey) {
-        return this.courseSchedulesByTerm.get(termKey) || [];
-    }
-
-    updateStudietaktSummary(termKey) {
-        let view = this.studietaktViews.get(termKey);
-        if (!view) {
-            const timelineGrid = this.timelineGrids.get(termKey);
-            if (timelineGrid && timelineGrid.parentElement) {
-                const newView = this.createStudietaktView(termKey);
-                timelineGrid.parentElement.appendChild(newView);
-                view = this.studietaktViews.get(termKey);
-            } else {
-                return;
-            }
-        }
-
-        const { overall, periods, empty } = view;
-        const termCode = termKey.slice(0, 2);
-        const termConfig = this.termInfo[termCode];
-
-        if (!termConfig) {
-            overall.textContent = 'Genomsnitt: 0% - 0 hp';
-            periods.innerHTML = '';
-            periods.style.display = 'none';
-            empty.style.display = 'block';
-            empty.textContent = 'Kan inte räkna ut studietakten för den här terminen.';
-            return;
-        }
-
-        const courses = this.getCourseSchedules(termKey).filter(course => course.durationWeeks > 0);
-        if (!courses.length) {
-            overall.textContent = 'Genomsnitt: 0% - 0 hp';
-            periods.innerHTML = '';
-            periods.style.display = 'none';
-            empty.style.display = 'block';
-            empty.textContent = 'Inga valda kurser ännu.';
-            return;
-        }
-
-        const analysisStart = termConfig.start;
-        const analysisEnd = termConfig.end;
-        const termWeeks = analysisEnd - analysisStart + 1;
-        const termFullTimeHp = this.fullTimeHpPerWeek * termWeeks;
-
-        const loadChanges = new Map();
-        let hasOverlap = false;
-
-        courses.forEach(course => {
-            const overlapStart = Math.max(course.startWeek, analysisStart);
-            const overlapEnd = Math.min(course.endWeek, analysisEnd);
-            if (overlapStart > overlapEnd) {
-                return;
-            }
-            hasOverlap = true;
-            const weeklyRate = course.hp / course.durationWeeks;
-            loadChanges.set(overlapStart, (loadChanges.get(overlapStart) || 0) + weeklyRate);
-            const endMarker = overlapEnd + 1;
-            loadChanges.set(endMarker, (loadChanges.get(endMarker) || 0) - weeklyRate);
-        });
-
-        if (!hasOverlap) {
-            overall.textContent = 'Genomsnitt: 0% - 0 hp';
-            periods.innerHTML = '';
-            periods.style.display = 'none';
-            empty.style.display = 'block';
-            empty.textContent = 'Kurserna ligger utanför den här terminen.';
-            return;
-        }
-
-        loadChanges.set(analysisStart, (loadChanges.get(analysisStart) || 0));
-        loadChanges.set(analysisEnd + 1, (loadChanges.get(analysisEnd + 1) || 0));
-
-        const sortedWeeks = Array.from(loadChanges.keys())
-            .filter(week => week >= analysisStart && week <= analysisEnd + 1)
-            .sort((a, b) => a - b);
-
-        let currentLoad = 0;
-        const segments = [];
-
-        for (let i = 0; i < sortedWeeks.length - 1; i++) {
-            const week = sortedWeeks[i];
-            currentLoad += loadChanges.get(week) || 0;
-            const nextWeek = sortedWeeks[i + 1];
-            const segmentStart = week;
-            const segmentEnd = Math.min(nextWeek - 1, analysisEnd);
-            if (segmentEnd < segmentStart) {
-                continue;
-            }
-            const weeksInSegment = segmentEnd - segmentStart + 1;
-            if (weeksInSegment <= 0) {
-                continue;
-            }
-            const totalHp = currentLoad * weeksInSegment;
-            const fullTimeHp = this.fullTimeHpPerWeek * weeksInSegment;
-            const percentRaw = fullTimeHp > 0 ? (totalHp / fullTimeHp) * 100 : 0;
-            const percent = Math.round(percentRaw * 10) / 10;
-            const totalHpRounded = Math.round(totalHp * 10) / 10;
-            const fullTimeHpRounded = Math.round(fullTimeHp * 10) / 10;
-            const weeklyLoadRounded = Math.round(currentLoad * 100) / 100;
-            segments.push({
-                startWeek: segmentStart,
-                endWeek: segmentEnd,
-                weeks: weeksInSegment,
-                percent,
-                totalHp: totalHpRounded,
-                fullTimeHp: fullTimeHpRounded,
-                weeklyLoad: weeklyLoadRounded
+        start() {
+            this.ensurePanel();
+            // Ignore our own rendering so it cannot trigger a render/observer loop.
+            this.observer = new MutationObserver(records => {
+                if (!this.body?.isConnected || records.some(record => !this.root?.contains(record.target))) this.schedule();
             });
-        }
-
-        const totalHpInTerm = segments.reduce((sum, segment) => sum + segment.totalHp, 0);
-        const avgPercentRaw = termFullTimeHp > 0 ? (totalHpInTerm / termFullTimeHp) * 100 : 0;
-        const avgPercent = Math.round(avgPercentRaw * 10) / 10;
-
-        overall.textContent = `Genomsnitt: ${this.formatNumber(avgPercent)}% - ${this.formatNumber(totalHpInTerm)} hp`;
-
-        periods.innerHTML = '';
-        periods.style.display = 'flex';
-        empty.style.display = 'none';
-
-        segments.forEach(segment => {
-            if (Math.abs(segment.totalHp) < 0.001) {
-                return;
-            }
-
-            const row = document.createElement('div');
-            row.className = 'studietakt-summary-row';
-            row.style.display = 'flex';
-            row.style.justifyContent = 'space-between';
-            row.style.alignItems = 'baseline';
-            row.style.gap = '12px';
-
-            const label = document.createElement('span');
-            label.style.fontSize = '13px';
-            label.style.color = '#333';
-            label.textContent = `${this.formatWeekRange(segment.startWeek, segment.endWeek)} (${segment.weeks} v)`;
-
-            const value = document.createElement('span');
-            value.style.fontSize = '13px';
-            value.style.color = '#333';
-            value.textContent = `${this.formatNumber(segment.percent)}% - ${this.formatNumber(segment.weeklyLoad, 2)} hp/v (${this.formatNumber(segment.totalHp)} av ${this.formatNumber(segment.fullTimeHp)} hp)`;
-
-            row.appendChild(label);
-            row.appendChild(value);
-            periods.appendChild(row);
-        });
-
-        if (!periods.hasChildNodes()) {
-            periods.style.display = 'none';
-            empty.style.display = 'block';
-            empty.textContent = 'Ingen studietakt inom den här terminen.';
-        }
-    }
-
-    formatWeekRange(startWeek, endWeek) {
-        if (startWeek === endWeek) {
-            return `v.${startWeek}`;
-        }
-        return `v.${startWeek}-${endWeek}`;
-    }
-
-    formatNumber(value, decimals = 1) {
-        const factor = Math.pow(10, decimals);
-        const rounded = Math.round(value * factor) / factor;
-        if (Math.abs(rounded - Math.round(rounded)) < 0.5 / factor) {
-            return Math.round(rounded).toString();
-        }
-        return rounded.toFixed(decimals);
-    }
-
-    findCourseElement(element) {
-        // Try to find the course container by walking up the DOM
-        let current = element;
-        while (current && !current.classList.contains('course-container')) {
-            current = current.parentElement;
-        }
-        
-        if (!current) {
-            // If we didn't find by class, try finding by structure
-            current = element;
-            while (current && !current.querySelector('.headline4')) {
-                current = current.parentElement;
-            }
-        }
-
-        return current;
-    }
-
-    initializeObserver() {
-        console.log('Initializing observer');
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.type === 'childList') {
-                    mutation.addedNodes.forEach((node) => {
-                        if (node.nodeType === 1) { // Element node
-                            // Look for any toggle selection buttons
-                            const buttons = node.querySelectorAll('button.toggleselection[data-id], button.button-component.toggleselection');
-                            
-                            buttons.forEach(button => {
-                                if (!button.hasAttribute('data-timeline-initialized')) {
-                                    button.setAttribute('data-timeline-initialized', 'true');
-                                    button.addEventListener('click', this.handleToggleSelection.bind(this));
-                                }
-                            });
-                        }
-                    });
+            this.observer.observe(document.documentElement, {
+                subtree: true, childList: true, characterData: true, attributes: true,
+                attributeFilter: ['class', 'style', 'disabled', 'hidden', 'aria-disabled', 'aria-hidden', 'aria-busy', 'aria-pressed']
+            });
+            document.addEventListener('click', this.schedule, true);
+            document.addEventListener('visibilitychange', this.schedule);
+            for (const event of ['popstate', 'hashchange', 'pageshow', 'focus']) window.addEventListener(event, this.schedule);
+            window.navigation?.addEventListener('navigatesuccess', this.schedule);
+            window.addEventListener('storage', event => {
+                if (event.key === STORAGE_KEY || event.key === null) {
+                    this.storageFailed = false;
+                    this.courses = this.readStored();
+                    this.render();
                 }
             });
-        });
+            this.sync();
+        }
 
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-    }
+        schedule() {
+            if (this.timer !== null) return;
+            this.timer = setTimeout(() => { this.timer = null; this.sync(); }, 100);
+        }
 
-    handleToggleSelection(e) {
-        console.log('Button clicked:', e.currentTarget.id);
-        const courseElement = this.findCourseElement(e.currentTarget);
-        if (!courseElement) return;
-        const courseId = e.currentTarget.getAttribute('data-id');
-        const timelineItem = document.getElementById(`timeline-${courseId}`);
-        const expandText = e.currentTarget.querySelector('.expand-text');
-        if (timelineItem) {
-            console.log('Removing course from timeline');
-            const coursePoints = courseElement.querySelector('.universal_medium').textContent.split(',')[0].trim().replace(/[^\d.]/g, '');
-            const hpValue = parseFloat(coursePoints);
-            const { term, year } = this.extractTermInfo(courseElement);
-            if (term && year) {
-                const termKey = `${term}${year}`;
-                this.removeCourseSchedule(termKey, courseId);
-                const updatedHp = Math.max(0, (this.totalHPByTerm[termKey] || 0) - hpValue);
-                this.updateTotalHP(updatedHp, termKey);
-                this.updateStudietaktSummary(termKey);
+        ensurePanel() {
+            if (this.root?.isConnected && this.body?.isConnected && this.root.contains(this.body)) return;
+            document.getElementById(PANEL_ID)?.remove();
+            this.root = element('aside', '', undefined);
+            this.root.id = PANEL_ID;
+            this.root.setAttribute('aria-label', 'Kurstidslinje');
+            const toggle = element('button', 'timeline-toggle');
+            toggle.type = 'button';
+            toggle.setAttribute('aria-controls', 'course-timelines-body');
+            toggle.append(element('span', 'timeline-title', 'Kurstidslinje'));
+            this.summary = element('span', 'timeline-count');
+            this.icon = element('span', 'timeline-toggle-icon');
+            this.icon.setAttribute('aria-hidden', 'true');
+            toggle.append(this.summary, this.icon);
+            this.body = element('div', 'timeline-body');
+            this.body.id = 'course-timelines-body';
+            this.toggle = toggle;
+            toggle.addEventListener('click', () => {
+                this.expanded = !this.expanded;
+                try { localStorage.setItem(PANEL_KEY, String(this.expanded)); } catch { /* In-memory UI still works. */ }
+                this.updateToggle();
+            });
+            this.root.append(toggle, this.body);
+            document.body.append(this.root);
+            this.render();
+        }
+
+        updateToggle() {
+            this.toggle.setAttribute('aria-expanded', String(this.expanded));
+            this.body.hidden = !this.expanded;
+            this.icon.textContent = this.expanded ? '▾' : '▴';
+            this.summary.textContent = this.courses.size ? `(${this.courses.size} ${this.courses.size === 1 ? 'kurs' : 'kurser'})` : '';
+        }
+
+        sync() {
+            this.ensurePanel();
+            const changes = new Map();
+            const cards = [...document.querySelectorAll(CARD_SELECTOR)];
+            for (const card of cards) {
+                const key = identity(card);
+                const selected = selectionState(card);
+                if (!key || selected === null) continue;
+                if (selected) {
+                    const course = readCourse(card);
+                    if (course) changes.set(key.id, course);
+                } else changes.set(key.id, null);
+            }
+
+            // Absence in search results, filters, or a loading route is NOT removal.
+            // Only a fully rendered Mina val list with a matching count is authoritative.
+            const selectionPage = document.querySelector('.selections-page');
+            const list = selectionPage?.querySelector('.selection-cards');
+            const emptyState = selectionPage?.querySelector('.mina-val-emptystate');
+            const countText = text(document.querySelector('a.selectionstab[aria-current="page"] .dynamic-content'));
+            const countMatch = countText.match(/^\((\d+)\)$/);
+            if (/\/my\/selections\/?$/.test(location.pathname) && (list || emptyState) && countMatch
+                && !selectionPage.closest('[aria-busy="true"]') && !selectionPage.querySelector('[aria-busy="true"]')) {
+                const listCards = list ? [...list.querySelectorAll(CARD_SELECTOR)] : [];
+                const selectedIds = new Set();
+                let complete = true;
+                let selectedCount = 0;
+                for (const card of listCards) {
+                    const selected = selectionState(card);
+                    const key = identity(card);
+                    if (selected === null || !key) complete = false;
+                    if (selected === true) {
+                        selectedCount++;
+                        if (key) selectedIds.add(key.id);
+                    }
+                }
+                const loaded = selectedCount > 0 || listCards.length > 0 || Boolean(emptyState);
+                if (loaded && complete && selectedCount === Number(countMatch[1])) {
+                    // Include storage so a tab with an older view does not resurrect stale courses.
+                    const known = new Map([...this.readStored(), ...this.courses]);
+                    for (const id of known.keys()) if (!selectedIds.has(id)) changes.set(id, null);
+                }
+            }
+            this.commit(changes);
+        }
+
+        commit(changes) {
+            let next;
+            try { next = this.storageFailed ? new Map(this.courses) : decode(localStorage.getItem(STORAGE_KEY)); }
+            catch { next = new Map(this.courses); }
+            for (const [id, course] of changes) {
+                if (course) next.set(id, course);
+                else next.delete(id);
+            }
+            const encode = courses => JSON.stringify({ version: 2, courses: [...courses.values()].sort((a, b) => a.id.localeCompare(b.id)) });
+            const raw = encode(next);
+            const changed = raw !== encode(this.courses);
+            this.courses = next;
+            if (changed) {
+                try { localStorage.setItem(STORAGE_KEY, raw); }
+                catch (error) {
+                    this.storageFailed = true;
+                    console.warn('Kurstidslinje: kunde inte spara valen.', error);
+                }
+                this.render();
+            }
+        }
+
+        render() {
+            if (!this.body?.isConnected) return;
+            this.updateToggle();
+            const content = document.createDocumentFragment();
+            if (!this.courses.size) {
+                content.append(element('p', 'timeline-empty', 'Lägg till kurser på Antagning.se för att se din tidslinje.'));
             } else {
-                console.error('Missing term information when removing course');
+                content.append(element('p', 'timeline-note', 'Veckor används från kursinformationen när den finns. Annars uppskattas längden från poäng och studietakt. Terminsöversikten använder ungefärliga terminsgränser.'));
+                const legend = element('div', 'timeline-legend');
+                for (const [pace, color] of COLORS) {
+                    const item = element('span', 'timeline-legend-item');
+                    const swatch = element('span', 'timeline-swatch');
+                    swatch.style.backgroundColor = color;
+                    item.append(swatch, document.createTextNode(`${pace} %`));
+                    legend.append(item);
+                }
+                content.append(legend);
+                const terms = new Map();
+                for (const course of this.courses.values()) {
+                    if (!terms.has(course.termKey)) terms.set(course.termKey, []);
+                    terms.get(course.termKey).push(course);
+                }
+                const order = key => Number(key.slice(2)) * 10 + { VT: 1, ST: 2, HT: 3 }[key.slice(0, 2)];
+                for (const termKey of [...terms.keys()].sort((a, b) => order(a) - order(b))) {
+                    content.append(this.renderTerm(termKey, terms.get(termKey)));
+                }
             }
-            timelineItem.remove();
-            if (expandText) {
-                expandText.textContent = 'Lägg till';
+            this.body.replaceChildren(content);
+        }
+
+        renderTerm(termKey, courses) {
+            const config = termConfig(termKey);
+            const length = config.end - config.start + 1;
+            const section = element('section', 'timeline-term');
+            const header = element('div', 'timeline-term-header');
+            header.append(element('h3', '', `${termKey.slice(0, 2)} ${termKey.slice(2)}`),
+                element('span', '', `Totalt: ${number(courses.reduce((sum, course) => sum + course.hp, 0))} hp`));
+            const weeks = element('div', 'timeline-weeks');
+            weeks.append(element('span', '', `v.${weekLabel(config.start, termKey)}`),
+                element('span', '', `v.${weekLabel(config.start + 10, termKey)}`),
+                element('span', '', `v.${weekLabel(config.end, termKey)}`));
+            section.append(header, weeks);
+            for (const course of courses) {
+                const row = element('div', 'course-timeline-item');
+                row.dataset.courseId = course.id;
+                const label = `${course.name} (${number(course.hp)} hp) — v.${weekLabel(course.startWeek, termKey)}–${weekLabel(course.endWeek, termKey)}${course.estimated ? ' (uppskattat)' : ''}`;
+                row.title = label;
+                const bar = element('div', 'course-progress');
+                const start = Math.max(config.start, course.startWeek);
+                const end = Math.min(config.end, course.endWeek);
+                bar.style.left = `${Math.min(100, Math.max(0, (start - config.start) / length * 100))}%`;
+                bar.style.width = `${Math.max(0, (end - start + 1) / length * 100)}%`;
+                bar.style.backgroundColor = COLORS.get(course.studietakt) || '#607d8b';
+                if (course.endWeek > config.end) bar.classList.add('timeline-overflow');
+                bar.setAttribute('aria-hidden', 'true');
+                row.append(bar, element('span', 'course-label', label));
+                section.append(row);
             }
-        } else {
-            console.log('Adding course to timeline');
-            this.addCourseToTimeline(courseElement);
-            if (expandText) {
-                expandText.textContent = 'Ta bort';
+            section.append(this.renderLoad(termKey, courses, config));
+            return section;
+        }
+
+        renderLoad(termKey, courses, config) {
+            const load = Array.from({ length: config.end - config.start + 1 }, (_, index) => {
+                const week = config.start + index;
+                return courses.filter(course => course.startWeek <= week && course.endWeek >= week)
+                    .reduce((sum, course) => sum + course.hp / course.durationWeeks, 0);
+            });
+            const total = load.reduce((sum, hp) => sum + hp, 0);
+            const summary = element('div', 'timeline-load');
+            const heading = element('div', 'timeline-load-heading');
+            heading.append(element('strong', '', 'Studietakt'), element('span', '',
+                `Genomsnitt: ${number(total / load.length / HP_PER_WEEK * 100)} % — ${number(total)} hp inom terminen`));
+            summary.append(heading, element('p', 'timeline-note', '100 % motsvarar 1,5 hp/vecka. Streckat slut på en stapel betyder att kursen fortsätter efter översiktens terminsgräns.'));
+            for (let i = 0; i < load.length;) {
+                let end = i;
+                while (end + 1 < load.length && Math.abs(load[end + 1] - load[i]) < 0.00001) end++;
+                if (load[i] > 0) {
+                    const row = element('div', 'timeline-load-row');
+                    row.append(element('span', '', `v.${weekLabel(config.start + i, termKey)}–${weekLabel(config.start + end, termKey)}`),
+                        element('span', '', `${number(load[i] / HP_PER_WEEK * 100)} % — ${number(load[i])} hp/v`));
+                    summary.append(row);
+                }
+                i = end + 1;
             }
+            return summary;
         }
     }
 
-    attachButtonListeners() {
-        const buttons = document.querySelectorAll('button.toggleselection[data-id], button.button-component.toggleselection');
-        buttons.forEach(button => {
-            if (!button.hasAttribute('data-timeline-initialized')) {
-                button.setAttribute('data-timeline-initialized', 'true');
-                button.addEventListener('click', this.handleToggleSelection.bind(this));
-            }
-        });
+    function initialize() {
+        const timeline = new CourseTimeline();
+        window.__antagningTimeline = timeline;
+        timeline.start();
     }
-}
-
-function initializeTimeline() {
-    console.log('Initializing timeline script');
-    
-    // Initialize timeline first
-    const timeline = new CourseTimeline();
-    
-    // Initialize observer
-    timeline.initializeObserver();
-    // Attach event listeners to pre-existing buttons
-    timeline.attachButtonListeners();
-
-    // Add initial courses that are already selected on the page
-    const addedButtons = document.querySelectorAll('.searchresultcard button.toggleselection[data-id], .course-container button.toggleselection[data-id]');
-    console.log('Found initially selected courses:', addedButtons.length);
-    
-    addedButtons.forEach(button => {
-        // Check if the button shows "Ta bort" (Remove) text
-        const contractText = button.querySelector('.contract-text:not(.hide)');
-        if (contractText && contractText.textContent.includes('Ta bort')) {
-            const courseElement = button.closest('.searchresultcard') || button.closest('.course-container');
-            if (courseElement) {
-                console.log('Adding initial course:', button.getAttribute('data-id'));
-                timeline.addCourseToTimeline(courseElement);
-            }
-        }
-    });
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeTimeline);
-} else {
-    initializeTimeline();
-}
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
+    else initialize();
+})();
