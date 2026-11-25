@@ -12,14 +12,17 @@
         button {font:inherit; padding:8px 14px; cursor:pointer; border:1px solid #adb8bd; border-radius:5px; background:white}
         main {max-width:900px; margin:24px auto; padding:0 20px}
         .searchresultcard {padding:20px; border:1px solid #ccd6da; border-radius:8px; background:white; margin:18px 0}
+        .card-header {display:flex; justify-content:space-between; align-items:center; gap:12px}
         .headline4 {margin:0 0 10px} .subtitle {font-weight:600} .contained-button {background:#dfedf1}
+        .favourite-toggle {border-radius:999px; font-size:14px}
+        .sr-only {position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap}
     </style>
 </head>
 <body>
     <header>Antagning.se — lokal testmiljö</header>
     <main>
         <h1>Kurstidslinje: navigationstest</h1>
-        <p>Lägg till en kurs, byt sida och ladda om. Öppna panelen längst ned för att se tidslinjen. Alla val på den här sidan är lokala testdata.</p>
+        <p>Lägg till en kurs, markera som favorit, byt sida och ladda om. Öppna panelen längst ned för att se tidslinjen. Alla val på den här sidan är lokala testdata.</p>
         <nav aria-label="Testsidor">
             <button data-page="search">Sökresultat</button><button data-page="selections">Mina val</button>
             <button data-page="other">Annan sida</button><button id="remove-panel">Återskapa panel</button>
@@ -28,20 +31,30 @@
     </main>
     <script>
         const samples = [
-            {code:'KAU-49454', name:'1700-talslitteratur', hp:'7,5', pace:25, start:3, end:22},
-            {code:'UU-05025', name:'1800-talsromanen', hp:'7,5', pace:50, start:3, end:12}
+            {code:'KAU-49454', name:'1700-talslitteratur', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:25, start:3, end:22},
+            {code:'UU-05025', name:'1800-talsromanen', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:50, start:3, end:12},
+            {code:'KTH-91002', name:'Introduktion till datavetenskap', hp:'15', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:100, start:3, end:12},
+            {code:'GU-33104', name:'Projekt i miljövetenskap', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Hösten 2027', pace:50, start:46, end:3}
         ];
         const selected = new Set(JSON.parse(localStorage.getItem('timelineDemoSelections') || '[]'));
+        const favourites = new Set(JSON.parse(localStorage.getItem('timelineDemoFavourites') || '[]'));
         const content = document.getElementById('site-content');
         function renderCard(course) {
             const chosen = selected.has(course.code);
-            return `<div class="searchresultcard"><h3 class="headline4">${course.name}</h3>
-                <div class="education-block-tags">Kurs ${course.hp} hp Studietakt ${course.pace} %</div>
-                <div><span class="subtitle">Startperiod: </span>Våren 2027 Period 1</div>
+            const fav = favourites.has(course.code);
+            return `<div class="searchresultcard">
+                <div class="card-header">
+                    <h3 class="headline4">${course.name}</h3>
+                    <utsokt-button-favourite>
+                        <button type="button" data-fav="${course.code}" data-cy="favourite-button" class="favourite-toggle ${fav ? 'favourite' : ''}">${fav ? '♥' : '♡'}<span class="sr-only">${fav ? 'Ta bort favorit' : 'Spara favorit'} för ${course.name}</span></button>
+                    </utsokt-button-favourite>
+                </div>
+                <div class="education-block-tags">Kurs ${course.hp} ${course.unitShort} Studietakt ${course.pace} %</div>
+                <div><span class="subtitle">Startperiod: </span>${course.term} Period 1</div>
                 <div><span class="subtitle">Startvecka: </span>Vecka ${course.start}</div>
                 <div><span class="subtitle">Slutvecka: </span>Vecka ${course.end}</div>
                 <div><span class="subtitle">Studietakt: </span>${course.pace} %</div>
-                <div><span class="subtitle">Omfattning: </span>${course.hp} högskolepoäng</div>
+                <div><span class="subtitle">Omfattning: </span>${course.hp} ${course.unit}</div>
                 <div><span class="subtitle">Anmälningskod: </span>${course.code}</div>
                 <utsokt-button-${chosen ? 'outlined class="remove-button"' : 'contained'}>
                     <button data-code="${course.code}" class="${chosen ? 'outlined-button' : 'contained-button'}">${chosen ? 'Ta bort' : 'Lägg till'} ${course.name}</button>
@@ -67,6 +80,11 @@
                 const code = button.dataset.code;
                 if (selected.has(code)) selected.delete(code); else selected.add(code);
                 localStorage.setItem('timelineDemoSelections', JSON.stringify([...selected]));
+                renderPage();
+            } else if (button?.dataset.fav) {
+                const code = button.dataset.fav;
+                if (favourites.has(code)) favourites.delete(code); else favourites.add(code);
+                localStorage.setItem('timelineDemoFavourites', JSON.stringify([...favourites]));
                 renderPage();
             } else if (button?.id === 'remove-panel') document.getElementById('course-timelines-container')?.remove();
         });

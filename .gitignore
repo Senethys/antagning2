@@ -1,4 +1,4 @@
-node_modules/ 
-*.log 
-*.tmp 
-.vscode/ 
+node_modules/
+*.log
+*.tmp
+.vscode/

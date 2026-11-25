@@ -278,3 +278,115 @@ test('storage sync does not immediately reverse another tab using stale rendered
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.equal(rows(w).length, 0);
 });
+
+test('favourited cards ("Ta bort favorit") never trigger false selection or block toggling', async t => {
+    const favUnselected = `<utsokt-button-favourite><button type="button" data-cy="favourite-button" class="favourite-toggle favourite"><span class="sr-only">Ta bort favorit för 1700-talslitteratur</span></button></utsokt-button-favourite>`
+        + card({ selected: false });
+    const favClosed = `<div class="searchresultcard"><h3 class="headline4">Stängd kurs</h3>
+        <div class="education-block-tags">Kurs 7,5 hp Studietakt 50 %</div>
+        <div class="card-more-info"><div><span class="subtitle">Startperiod: </span>Våren 2027 Period 1</div>
+        <div><span class="subtitle">Anmälningskod: </span>CLOSED-1</div></div>
+        <utsokt-button-favourite><button type="button" data-cy="favourite-button" class="favourite-toggle favourite"><span class="sr-only">Ta bort favorit för Stängd kurs</span></button></utsokt-button-favourite>
+        <div class="applied-tag">Anmäld</div></div>`;
+    const w = await page(t, `<div class="searchresultcard">${favUnselected.replace('<div class="searchresultcard">', '')}${favClosed}`);
+    assert.equal(rows(w).length, 0);
+    main(w).querySelector('utsokt-button-contained .button-text').firstChild.nodeValue = 'Ta bort';
+    main(w).querySelector('utsokt-button-contained').outerHTML = `<utsokt-button-outlined class="remove-button"><button class="button-component outlined-button"><span class="button-text">Ta bort</span></button></utsokt-button-outlined>`;
+    await until(() => assert.deepEqual(ids(w), ['VT2027:KAU-49454']));
+});
+
+test('autumn courses starting in week 34 or 35 stay in the current autumn term', async t => {
+    const w = await page(t, card({ code: 'EARLY-HT', term: 'Hösten 2027', hp: '16,5', start: 35, end: 45, pace: '100 %' }));
+    assert.equal(rows(w).length, 1);
+    assert.match(rows(w)[0].title, /v\.35–45$/);
+    assert.match(w.document.querySelector('.timeline-load-heading').textContent, /50 % — 15 hp inom terminen/);
+    assert.ok(w.document.querySelector('.course-progress.timeline-underflow'));
+});
+
+test('multi-year programmes wrap week labels across multiple calendar years', async t => {
+    const w = await page(t, card({ code: 'BACHELOR', term: 'Våren 2025', hp: '180', pace: '100 %', start: 4, end: null }));
+    assert.equal(rows(w).length, 1);
+    // 180 hp at 100% = 120 weeks starting v.4 2025 -> endWeek 123 -> 2025 (52w) + 2026 (53w) = 105 -> v.18 (2027)
+    assert.match(rows(w)[0].title, /v\.4–18 \(2027\) \(uppskattat\)/);
+});
+
+test('fup credits, intensive >100% courses, and English UniversityAdmissions cards are parsed', async t => {
+    const fupCard = `<div class="searchresultcard"><h3 class="headline4">Basår matematik</h3>
+        <div class="education-block-tags">Kurs 30 fup Studietakt 100 %</div>
+        <div class="card-more-info"><div><span class="subtitle">Startperiod: </span>Våren 2027 Period 1</div>
+        <div><span class="subtitle">Startvecka: </span>Vecka 3</div>
+        <div><span class="subtitle">Slutvecka: </span>Vecka 22</div>
+        <div><span class="subtitle">Anmälningskod: </span>KTH-BAS1</div>
+        <div><span class="subtitle">Omfattning: </span>30 förutbildningspoäng</div>
+        <div><span class="subtitle">Studietakt: </span>100 %</div></div>
+        <utsokt-button-outlined class="remove-button"><button class="button-component outlined-button"><span class="button-text">Ta bort</span></button></utsokt-button-outlined></div>`;
+    const intensiveCard = card({ code: 'INT-1', term: 'Våren 2027', hp: '7,5', pace: 'Okänd', start: 3, end: 6 });
+    const englishCard = `<div class="searchresultcard"><h3 class="headline4">Machine Learning</h3>
+        <div class="education-block-tags">Course 7.5 Credits Pace of study 50%</div>
+        <div class="card-more-info"><div><span class="subtitle">Period: </span>Autumn 2027 Period 1</div>
+        <div><span class="subtitle">Course dates: </span>30 Aug - 1 Nov</div>
+        <div><span class="subtitle">Application code: </span>UU-EN01</div>
+        <div><span class="subtitle">Credits/length: </span>7.5 Credits</div>
+        <div><span class="subtitle">Pace of study: </span>50%</div></div>
+        <utsokt-button-outlined class="remove-button"><button class="button-component outlined-button"><span class="button-text">Remove<span class="sr-only"> Machine Learning</span></span></button></utsokt-button-outlined></div>`;
+    const w = await page(t, fupCard + intensiveCard + englishCard);
+    assert.deepEqual(ids(w), ['VT2027:INT-1', 'VT2027:KTH-BAS1', 'HT2027:UU-EN01']);
+    assert.match(w.document.querySelector('[data-course-id="VT2027:KTH-BAS1"]').textContent, /30 fup/);
+    assert.match(w.document.querySelector('[data-course-id="HT2027:UU-EN01"]').title, /v\.35–44$/);
+});
+
+test('pending spinner buttons and prerequisite prose percentages do not alter selections', async t => {
+    const legacyNoTags = `<div class="searchresultcard"><h3 class="headline4">Prose Test</h3>
+        <p class="universal_medium">7,5 högskolepoäng, Test</p>
+        <p>Förkunskapskrav: 100 % närvaro krävs.</p>
+        <div><span class="subtitle">Startperiod: </span>Våren 2027 Period 1</div>
+        <div><span class="subtitle">Anmälningskod: </span>PROSE-1</div>
+        <button class="toggleselection" data-id="VT2027-PROSE-1"><span class="expand-text hide">Lägg till</span><span class="contract-text">Ta bort</span></button></div>`;
+    const w = await page(t, legacyNoTags);
+    assert.equal(rows(w).length, 0);
+    main(w).innerHTML = card({ selected: true }).replace('outlined-button', 'outlined-button ispending');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(rows(w).length, 0);
+});
+
+test('chronological sorting, overload highlighting, single-week load, Escape, and clear cache work', async t => {
+    const w = await page(t, card({ code: 'P2', hp: '15', pace: '100 %', start: 13, end: 22 })
+        + card({ code: 'P1', hp: '37,5', pace: '100 %', start: 3, end: 12 }), cached(storedCourse('OFFPAGE', 'HT2027')));
+    const vtIds = [...w.document.querySelectorAll('.timeline-term:first-of-type [data-course-id]')].map(r => r.dataset.courseId);
+    assert.deepEqual(vtIds, ['VT2027:P1', 'VT2027:P2']);
+    assert.match(w.document.querySelector('.timeline-term-header').textContent, /över 45 hp/);
+    assert.ok(w.document.querySelector('.timeline-load-row.is-overload'));
+
+    // Single-week course renders v.3 without duplicate range dash
+    const singleWeek = await page(t, card({ code: 'W1', hp: '1,5', pace: '100 %', start: 3, end: 3 }));
+    assert.match(singleWeek.document.querySelector('.timeline-load-row').textContent, /^v\.3(?!–)/);
+
+    // Escape closes expanded panel and Clear resets off-page cache while resyncing visible page
+    w.document.querySelector('.timeline-toggle').click();
+    assert.equal(w.document.querySelector('#course-timelines-body').hidden, false);
+    w.document.querySelector(PANEL).dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(w.document.querySelector('#course-timelines-body').hidden, true);
+    w.document.querySelector('.timeline-toggle').click();
+    w.document.querySelector('.timeline-clear').click();
+    await until(() => assert.deepEqual(ids(w), ['VT2027:P1', 'VT2027:P2']));
+});
+
+test('real antagning.html snapshot parses and toggles legacy cards accurately', async t => {
+    const rawHtml = fs.readFileSync(`${__dirname}/antagning.html`, 'utf8')
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<link[^>]*>/gi, '')
+        .replace('</head>', '<style>.hide {display:none}</style></head>');
+    const dom = new JSDOM(rawHtml, { url: 'https://www.antagning.se/se/search', runScripts: 'outside-only', pretendToBeVisual: true });
+    t.after(() => dom.window.close());
+    const w = dom.window;
+    w.eval(source);
+    await new Promise(resolve => w.setTimeout(resolve, 0));
+    const toggles = [...w.document.querySelectorAll('button.toggleselection[data-id]')];
+    assert.equal(toggles.length, 36);
+    // Select first 4 toggleable courses (includes 7,5 hp Halvfart, 20%, Helfart, 150 hp programme)
+    for (const btn of toggles.slice(0, 4)) {
+        btn.querySelector('.expand-text').classList.add('hide');
+        btn.querySelector('.contract-text').classList.remove('hide');
+    }
+    await until(() => assert.equal(rows(w).length, 4));
+});

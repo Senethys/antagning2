@@ -1,46 +1,50 @@
 # Antagning.se Course Timeline
 
-A Chrome/Edge extension that keeps a course timeline visible while you move between Antagning.se search results, Mina val, and other pages.
+A Chrome/Edge (Manifest V3) extension that keeps a visual course timeline and weekly study-load summary visible while you move between Antagning.se search results, **Mina val**, and other pages.
 
 ## Install or reload
 
 1. Open `chrome://extensions` (Chrome) or `edge://extensions` (Edge).
-2. Enable Developer mode and use **Load unpacked** to select this folder.
-3. If the extension is already installed from this folder, click its **Reload** button.
-4. Refresh any Antagning.se tabs that were already open.
+2. Enable **Developer mode** and click **Load unpacked**, selecting this repository folder.
+3. If the extension is already installed from this folder, click **Reload**.
+4. Refresh any open `antagning.se` tabs.
 
-The **Kurstidslinje** button at the bottom of the page opens the panel. Your expanded/collapsed preference is saved.
+Click the **Kurstidslinje** bar at the bottom of the page to expand or collapse the timeline (press `Escape` while expanded to collapse). Your expanded/collapsed preference and selected courses are stored per browser origin in `localStorage`.
 
 ## Behavior
 
-- Reads confirmed selections from the site's Add/Remove controls, including the current Angular components and older toggle buttons.
-- Reacts to DOM and navigation events; no polling timer or per-card event listeners.
-- Keeps off-page courses during searches, filters, route changes, and refreshes.
-- Removes a course when its card explicitly becomes unselected. A complete Mina val list can remove stale cached courses only when its selected-card count matches the site's count. The site's explicit empty state confirms an empty list; an initial empty loading list does not.
-- Uses the term plus application code as the identity, so the same code in different terms does not collide.
-- Restores the panel if the site replaces it and prevents duplicate startup.
-- Validates saved records and accepts the previous grouped storage format.
-- Saves course metadata in this browser's local storage for the current website origin. Browser storage events update other open tabs; this extension does not fetch the user's account or courses that have never been displayed.
+- **Current & legacy Antagning.se support**: Reads confirmed selections from Antagning.se's current Angular components (`utsokt-button-contained` / `utsokt-button-outlined`) as well as legacy `button.toggleselection` controls. Ignores favourite toggle buttons (`utsokt-button-favourite`), info popovers, and pending spinner states (`ispending`).
+- **Event-driven synchronization**: Uses `MutationObserver` and browser navigation events (`popstate`, `hashchange`, `pageshow`, `focus`, `navigatesuccess`) with no polling timers or per-card event listeners.
+- **Persistent across pages & tabs**: Keeps off-page selections across searches, filter changes, route transitions, and reloads, and synchronizes open tabs via `storage` events.
+- **Safe reconciliation on Mina val**: Removes a course immediately when its card explicitly changes to unselected. On `/my/selections`, stale cached entries are pruned only once the list finishes loading and its selected-card count matches the page tab counter (or the explicit `.mina-val-emptystate` is shown).
+- **Term-scoped identities**: Identifies courses by `<TERM><YEAR>:<APPLICATION_CODE>` so identical application codes in different terms do not collide.
+- **Self-healing panel**: Restores the panel automatically if the site replaces DOM nodes and guards against duplicate script injection.
 
-## Timeline estimates
+## Timeline & study load estimates
 
-Explicit Startvecka and Slutvecka take priority. Otherwise, start period and credits/study pace estimate the schedule. Estimated rows are labeled **uppskattat**. Full time is modeled as 1.5 hp/week. Default overview boundaries are approximate: spring weeks 3–22, summer weeks 23–35, and autumn 20 weeks from week 36, continuing into the next year. Actual course weeks are shown in each row and its tooltip; courses continuing past the overview have a striped ending.
+- Explicit **Startvecka** and **Slutvecka** take priority. Otherwise, **Startperiod** and credits/study pace estimate the course schedule, and estimated rows are labeled **uppskattat**.
+- Supports both `hp` (*högskolepoäng*) and `fup` (*förutbildningspoäng*), as well as intensive courses over 100% pace.
+- Default overview windows: spring (`VT`) weeks 3–22, summer (`ST`) weeks 23–35, and autumn (`HT`) 20 weeks starting week 36 (wrapping into the following year; courses starting in weeks 34–35 stay in the current autumn term).
+- Full-time study pace (`100 %`) corresponds to `1.5 hp/week`. Overlapping weeks above `100 %` and term totals above `45 hp` are highlighted; courses extending outside the term window display striped boundaries.
+- Use **Rensa cache** inside the panel to clear saved off-page courses and re-read the current page.
 
-Unknown terms or insufficient schedule information are skipped instead of assigned an invented term.
+## Files
 
-## Development
+- `manifest.json`: Manifest V3 extension definition (no extra permissions requested).
+- `timeline.js`: Course metadata parsing, validated `localStorage` persistence, synchronization, and timeline/load rendering.
+- `timeline.css`: Scoped styles for the bottom drawer panel.
+- `icons/` & `icon.svg`: Extension icons (`16x16`, `48x48`, `128x128`).
+- `test_dom.js`: Automated `node:test` + `jsdom` regression suite.
+- `antagning.html`: Real saved Antagning.se search page HTML fixture used by tests.
+- `test_comprehensive.html`: Interactive local demonstration page.
 
-- `manifest.json`: content-script registration; no extra extension permissions.
-- `timeline.js`: course parsing, validated persistence, synchronization, and rendering.
-- `timeline.css`: styles scoped to the panel.
-- `test_dom.js`: automated DOM/navigation regression checks.
-- `test_comprehensive.html`: interactive local demonstration.
+## Development & testing
 
-Run the tests with Node.js 18 or newer:
+Run the automated test suite with Node.js 18 or newer:
 
 ```sh
 npm install
 npm test
 ```
 
-To open the local demonstration with working navigation and storage, serve this directory with a local HTTP server and open `test_comprehensive.html`. No browser extension is required for the demonstration.
+To inspect the interactive demonstration locally, serve this directory over HTTP (for example `npx serve .` or `python -m http.server`) and open `test_comprehensive.html`.
