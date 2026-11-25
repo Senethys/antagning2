@@ -20,14 +20,9 @@
         '.close-button'
     ].join(', ');
     const HP_PER_WEEK = 1.5;
-    const COLORS = new Map([
-        [100, '#4caf50'],
-        [75, '#26a69a'],
-        [50, '#ffa726'],
-        [25, '#5c6bc0'],
-        [20, '#7e57c2'],
-        [10, '#ef5350']
-    ]);
+    const WEEK_MS = 7 * 86400000;
+    const MONDAY_EPOCH = Date.UTC(1970, 0, 5);
+    const TERM_NAMES = { VT: 'Vårterminen', ST: 'Sommarterminen', HT: 'Höstterminen' };
     const TERM_MAP = {
         hösten: 'HT', autumn: 'HT', fall: 'HT', ht: 'HT',
         våren: 'VT', spring: 'VT', vt: 'VT',
@@ -126,6 +121,31 @@
         return `v.${start}–${weekLabel(endWeek, termKey)}`;
     }
 
+    function firstWeekIndex(termKey) {
+        // ISO week 1 contains January 4. Count weeks from a known Monday.
+        return Math.floor((Date.UTC(Number(termKey.slice(2)), 0, 4) - MONDAY_EPOCH) / WEEK_MS);
+    }
+
+    function weeklyLoad(courses) {
+        const weeks = new Map();
+        for (const course of courses) {
+            const offset = firstWeekIndex(course.termKey) - 1;
+            const hp = course.unit === 'fup' ? 0 : course.hp / course.durationWeeks;
+            const percent = course.unit === 'fup'
+                ? (course.paceEstimated === true ? 0 : course.studietakt)
+                : hp / HP_PER_WEEK * 100;
+            for (let week = course.startWeek; week <= course.endWeek; week++) {
+                const key = offset + week;
+                if (!weeks.has(key)) weeks.set(key, { hp: 0, percent: 0, unknown: false });
+                const load = weeks.get(key);
+                load.hp += hp;
+                load.percent += percent;
+                load.unknown ||= percent === 0;
+            }
+        }
+        return weeks;
+    }
+
     function identity(card) {
         const termText = field(card, 'Startperiod', 'Period') || text(card);
         const match = termText.match(/(Hösten|Våren|Sommar(?:en)?|Autumn|Spring|Summer|Fall)\s*(20\d{2})/i)
@@ -195,13 +215,15 @@
         if (endWeek !== null && endWeek < startWeek) return null;
         const durationWeeks = endWeek !== null ? endWeek - startWeek + 1
             : studietakt > 0 ? Math.ceil(hp / HP_PER_WEEK * 100 / studietakt) : 0;
-        if (!studietakt && durationWeeks) studietakt = hp / durationWeeks / HP_PER_WEEK * 100;
+        const paceEstimated = !studietakt;
+        if (paceEstimated && durationWeeks) studietakt = hp / durationWeeks / HP_PER_WEEK * 100;
         const course = {
             ...key,
             name,
             hp,
             unit,
             studietakt,
+            paceEstimated,
             startWeek,
             durationWeeks,
             endWeek: startWeek + durationWeeks - 1,
@@ -218,6 +240,7 @@
             && Number.isFinite(course.hp) && course.hp > 0
             && (course.unit === undefined || course.unit === 'hp' || course.unit === 'fup')
             && Number.isFinite(course.studietakt) && course.studietakt > 0 && course.studietakt <= 400
+            && (course.paceEstimated === undefined || typeof course.paceEstimated === 'boolean')
             && Number.isInteger(course.startWeek) && course.startWeek >= 1 && course.startWeek <= 106
             && Number.isInteger(course.durationWeeks) && course.durationWeeks > 0 && course.durationWeeks <= 520
             && course.endWeek === course.startWeek + course.durationWeeks - 1;
@@ -366,26 +389,42 @@
             const toggle = element('button', 'timeline-toggle');
             toggle.type = 'button';
             toggle.setAttribute('aria-controls', 'course-timelines-body');
-            toggle.append(element('span', 'timeline-title', 'Kurstidslinje'));
+            const inner = element('span', 'timeline-toggle-inner');
+            const mark = element('span', 'timeline-mark');
+            mark.setAttribute('aria-hidden', 'true');
+            mark.append(element('span'), element('span'), element('span'));
             this.summary = element('span', 'timeline-count');
-            this.icon = element('span', 'timeline-toggle-icon');
-            this.icon.setAttribute('aria-hidden', 'true');
-            toggle.append(this.summary, this.icon);
+            const title = element('span', 'timeline-toggle-label');
+            title.append(element('span', 'timeline-title', 'Kurstidslinje'), this.summary);
+            const action = element('span', 'timeline-toggle-action');
+            const icon = element('span', 'timeline-toggle-icon');
+            icon.setAttribute('aria-hidden', 'true');
+            this.actionText = element('span');
+            action.append(this.actionText, icon);
+            inner.append(mark, title, action);
+            toggle.append(inner);
             this.body = element('div', 'timeline-body');
             this.body.id = 'course-timelines-body';
+            this.content = element('div', 'timeline-content');
+            this.help = element('details', 'timeline-help');
+            this.help.append(element('summary', '', 'Om veckor och beräkningar'), element('p', '',
+                'Belastningen räknas över alla valda kurser. Högskolepoäng fördelas jämnt över kursveckorna och 1,5 hp per vecka motsvarar heltid. För kurser med förutbildningspoäng används angiven studietakt. Veckovyn följer ungefärliga terminsgränser.'));
+            const clear = element('button', 'timeline-clear', 'Läs in kurser på nytt');
+            clear.type = 'button';
+            clear.addEventListener('click', () => this.clearSaved());
+            const refresh = element('div', 'timeline-refresh');
+            refresh.append(element('p', '', 'Läser in kurserna på sidan igen och tömmer sparade uppgifter från andra sidor. Öppna Mina val för att läsa in hela listan.'), clear);
+            this.help.append(refresh);
+            this.status = element('p', 'timeline-status');
+            this.status.setAttribute('role', 'status');
+            this.body.append(this.content, this.help, this.status);
             this.toggle = toggle;
-            toggle.addEventListener('click', () => {
-                this.expanded = !this.expanded;
-                try { localStorage.setItem(PANEL_KEY, String(this.expanded)); } catch { /* In-memory UI still works. */ }
-                this.updateToggle();
-            });
+            toggle.addEventListener('click', () => this.setExpanded(!this.expanded));
             this.root.addEventListener('keydown', event => {
-                if (event.key === 'Escape' && this.expanded) {
-                    this.expanded = false;
-                    try { localStorage.setItem(PANEL_KEY, 'false'); } catch { /* In-memory UI still works. */ }
-                    this.updateToggle();
-                    this.toggle.focus();
-                }
+                if (event.key !== 'Escape' || !this.expanded || event.defaultPrevented) return;
+                event.stopPropagation();
+                this.setExpanded(false);
+                this.toggle.focus();
             });
             this.root.append(toggle, this.body);
             this.header = null;
@@ -395,9 +434,19 @@
 
         updateToggle() {
             this.toggle.setAttribute('aria-expanded', String(this.expanded));
+            this.root.classList.toggle('timeline-expanded', this.expanded);
             this.body.hidden = !this.expanded;
-            this.icon.textContent = this.expanded ? '▴' : '▾';
-            this.summary.textContent = this.courses.size ? `(${this.courses.size} ${this.courses.size === 1 ? 'kurs' : 'kurser'})` : '';
+            this.actionText.textContent = this.expanded ? 'Dölj planering' : 'Visa planering';
+            this.summary.textContent = `${this.courses.size} ${this.courses.size === 1 ? 'vald kurs' : 'valda kurser'}`;
+        }
+
+        setExpanded(expanded) {
+            this.expanded = expanded;
+            try { localStorage.setItem(PANEL_KEY, String(expanded)); } catch { /* In-memory UI still works. */ }
+            this.updateToggle();
+            if (expanded && this.root.getBoundingClientRect().top < (this.header?.getBoundingClientRect().bottom || 0)) {
+                this.root.scrollIntoView?.({ block: 'start' });
+            }
         }
 
         clearSaved() {
@@ -406,6 +455,7 @@
             try { localStorage.removeItem(STORAGE_KEY); } catch { /* In-memory UI still works. */ }
             this.sync();
             this.render();
+            this.status.textContent = `Kurserna på sidan har lästs in. ${this.summary.textContent}.`;
         }
 
         sync() {
@@ -479,116 +529,187 @@
         render() {
             if (!this.body?.isConnected) return;
             this.updateToggle();
+            const active = document.activeElement;
+            const focusId = this.content.contains(active) ? active.id : '';
+            const openDetails = new Set([...this.content.querySelectorAll('details[open]')].map(detail => detail.id));
+            this.help.hidden = this.courses.size === 0;
             const content = document.createDocumentFragment();
+            this.status.textContent = '';
             if (!this.courses.size) {
-                content.append(element('p', 'timeline-empty', 'Lägg till kurser på Antagning.se för att se din tidslinje.'));
+                const empty = element('div', 'timeline-empty');
+                const search = element('a', 'timeline-link', 'Hitta utbildningar');
+                search.href = '/se/search';
+                search.id = 'timeline-find-courses';
+                empty.append(element('h2', '', 'Inga kurser i din planering'), element('p', '',
+                    'Välj Lägg till vid en kurs på Antagning.se. Då visas kursens veckor och studietakt här.'), search);
+                content.append(empty);
             } else {
-                const toolbar = element('div', 'timeline-toolbar');
-                toolbar.append(element('p', 'timeline-note', 'Veckor används från kursinformationen när den finns. Annars uppskattas längden från poäng och studietakt. Terminsöversikten använder ungefärliga terminsgränser.'));
-                const clearBtn = element('button', 'timeline-clear', 'Rensa cache');
-                clearBtn.type = 'button';
-                clearBtn.title = 'Rensa sparade kurser från andra sidor och läs om aktuell sida';
-                clearBtn.addEventListener('click', () => this.clearSaved());
-                toolbar.append(clearBtn);
-                content.append(toolbar);
-
-                const legend = element('div', 'timeline-legend');
-                for (const [pace, color] of COLORS) {
-                    const item = element('span', 'timeline-legend-item');
-                    const swatch = element('span', 'timeline-swatch');
-                    swatch.style.backgroundColor = color;
-                    item.append(swatch, document.createTextNode(`${pace} %`));
-                    legend.append(item);
-                }
-                const overflowItem = element('span', 'timeline-legend-item');
-                overflowItem.append(element('span', 'timeline-swatch timeline-swatch-overflow'), document.createTextNode('Utanför terminsgräns'));
-                legend.append(overflowItem);
-                content.append(legend);
-
                 const terms = new Map();
                 for (const course of this.courses.values()) {
                     if (!terms.has(course.termKey)) terms.set(course.termKey, []);
                     terms.get(course.termKey).push(course);
                 }
                 const order = key => Number(key.slice(2)) * 10 + { VT: 1, ST: 2, HT: 3 }[key.slice(0, 2)];
-                for (const termKey of [...terms.keys()].sort((a, b) => order(a) - order(b))) {
-                    content.append(this.renderTerm(termKey, terms.get(termKey)));
+                const termKeys = [...terms.keys()].sort((a, b) => order(a) - order(b));
+                const load = weeklyLoad(this.courses.values());
+                if (termKeys.length > 1) {
+                    const nav = element('nav', 'timeline-nav');
+                    nav.setAttribute('aria-label', 'Hoppa till termin');
+                    nav.append(element('span', '', 'Hoppa till'));
+                    for (const key of termKeys) {
+                        const link = element('a', 'timeline-link', `${key.slice(0, 2)} ${key.slice(2)}`);
+                        link.id = `timeline-link-${key}`;
+                        link.href = `#timeline-term-${key}`;
+                        link.addEventListener('click', event => {
+                            event.preventDefault();
+                            const target = document.getElementById(`timeline-term-${key}`);
+                            target.focus({ preventScroll: true });
+                            target.scrollIntoView?.({ block: 'start' });
+                        });
+                        nav.append(link);
+                    }
+                    content.append(nav);
+                }
+                for (const termKey of termKeys) {
+                    const term = this.renderTerm(termKey, terms.get(termKey), load);
+                    const detail = term.querySelector('details');
+                    detail.open = openDetails.has(detail.id);
+                    content.append(term);
                 }
             }
-            this.body.replaceChildren(content);
+            this.content.replaceChildren(content);
+            if (focusId || (this.help.hidden && this.help.contains(active))) {
+                (document.getElementById(focusId) || this.toggle).focus({ preventScroll: true });
+            }
         }
 
-        renderTerm(termKey, termCourses) {
+        renderTerm(termKey, termCourses, load) {
             const courses = [...termCourses].sort((a, b) => a.startWeek - b.startWeek || a.endWeek - b.endWeek || a.name.localeCompare(b.name, 'sv'));
             const config = termConfig(termKey);
             const length = config.end - config.start + 1;
             const section = element('section', 'timeline-term');
+            const title = element('h2', '', `${TERM_NAMES[termKey.slice(0, 2)]} ${termKey.slice(2)}`);
+            title.id = `timeline-term-${termKey}`;
+            title.tabIndex = -1;
+            section.setAttribute('aria-labelledby', title.id);
             const header = element('div', 'timeline-term-header');
-            const totalHp = courses.reduce((sum, course) => sum + course.hp, 0);
-            const allFup = courses.every(course => course.unit === 'fup');
-            const totalText = `Totalt: ${number(totalHp)} ${allFup ? 'fup' : 'hp'}${totalHp > 45 ? ' (över 45 hp)' : ''}`;
-            header.append(element('h3', '', `${termKey.slice(0, 2)} ${termKey.slice(2)}`), element('span', '', totalText));
+            const credits = { hp: 0, fup: 0 };
+            for (const course of courses) credits[course.unit === 'fup' ? 'fup' : 'hp'] += course.hp;
+            const totals = Object.entries(credits).filter(([, value]) => value > 0)
+                .map(([unit, value]) => `${number(value)} ${unit}`).join(' + ');
+            const stats = element('p', 'timeline-term-stats', `${courses.length} ${courses.length === 1 ? 'kurs' : 'kurser'} · ${totals}`);
+            header.append(title, stats);
+            if (credits.hp > 45) header.append(element('span', 'timeline-credit-warning', 'Över 45 hp'));
+
+            const termLoad = this.renderLoad(termKey, courses, config, load);
+            const axis = element('div', 'timeline-chart-header');
             const weeks = element('div', 'timeline-weeks');
             const ticks = termKey.startsWith('ST')
                 ? [config.start, config.start + 6, config.end]
                 : [config.start, config.start + 5, config.start + 10, config.start + 15, config.end];
-            for (const tick of ticks) weeks.append(element('span', '', `v.${weekLabel(tick, termKey)}`));
-            section.append(header, weeks);
+            for (const tick of ticks) {
+                const label = element('span', '', `v.${weekLabel(tick, termKey)}`);
+                label.style.setProperty('--tick-position', `${(tick - config.start + 0.5) / length * 100}%`);
+                weeks.append(label);
+            }
+            axis.setAttribute('aria-hidden', 'true');
+            axis.append(element('span', '', 'Kurser'), weeks);
+            const list = element('ul', 'timeline-courses');
+            list.setAttribute('role', 'list');
             for (const course of courses) {
-                const row = element('div', 'course-timeline-item');
+                const row = element('li', 'course-timeline-item');
                 row.dataset.courseId = course.id;
                 const unit = course.unit === 'fup' ? 'fup' : 'hp';
-                const label = `${course.name} (${number(course.hp)} ${unit}) — ${formatWeekRange(course.startWeek, course.endWeek, termKey)}${course.estimated ? ' (uppskattat)' : ''}`;
-                row.title = label;
+                const info = element('div', 'course-info');
+                const hasPace = unit !== 'fup' || course.paceEstimated !== true;
+                const paceText = hasPace ? `${number(course.studietakt)} %${course.paceEstimated ? ' uppskattad studietakt' : ' studietakt'}` : 'Studietakt saknas';
+                const meta = element('div', 'course-meta');
+                meta.append(element('span', '', `${number(course.hp)} ${unit}`), element('span', '', paceText),
+                    element('span', 'course-schedule', `${formatWeekRange(course.startWeek, course.endWeek, termKey)}${course.estimated ? ' (uppskattat)' : ''}`));
+                if (course.startWeek < config.start || course.endWeek > config.end) {
+                    meta.append(element('span', 'timeline-boundary', 'Veckor utanför veckovyn'));
+                }
+                info.append(element('span', 'course-label', course.name), meta);
+                const track = element('div', 'course-track');
+                track.setAttribute('aria-hidden', 'true');
+                track.style.setProperty('--week-size', `${100 / length}%`);
                 const bar = element('div', 'course-progress');
                 const start = Math.max(config.start, course.startWeek);
                 const end = Math.min(config.end, course.endWeek);
                 if (end >= start) {
-                    bar.style.left = `${Math.min(100, Math.max(0, (start - config.start) / length * 100))}%`;
-                    bar.style.width = `${Math.max(0, (end - start + 1) / length * 100)}%`;
-                } else {
-                    bar.style.left = course.endWeek < config.start ? '0%' : '97%';
-                    bar.style.width = '3%';
-                    bar.classList.add('timeline-outside');
+                    bar.style.left = `${(start - config.start) / length * 100}%`;
+                    bar.style.width = `${(end - start + 1) / length * 100}%`;
+                    if (course.estimated) bar.classList.add('timeline-estimated');
+                    if (course.startWeek < config.start) bar.classList.add('timeline-underflow');
+                    if (course.endWeek > config.end) bar.classList.add('timeline-overflow');
+                    track.append(bar);
                 }
-                const paceKey = Math.round(course.studietakt);
-                bar.style.backgroundColor = COLORS.get(paceKey) || (paceKey > 100 ? '#d84315' : '#607d8b');
-                if (course.startWeek < config.start) bar.classList.add('timeline-underflow');
-                if (course.endWeek > config.end) bar.classList.add('timeline-overflow');
-                bar.setAttribute('aria-hidden', 'true');
-                row.append(bar, element('span', 'course-label', label));
-                section.append(row);
+                row.append(info, track);
+                list.append(row);
             }
-            section.append(this.renderLoad(termKey, courses, config));
+            section.append(header, termLoad.overview, axis, list, termLoad.details);
             return section;
         }
 
-        renderLoad(termKey, courses, config) {
-            const load = Array.from({ length: config.end - config.start + 1 }, (_, index) => {
-                const week = config.start + index;
-                return courses.filter(course => course.startWeek <= week && course.endWeek >= week)
-                    .reduce((sum, course) => sum + course.hp / course.durationWeeks, 0);
-            });
-            const total = load.reduce((sum, hp) => sum + hp, 0);
-            const summary = element('div', 'timeline-load');
-            const heading = element('div', 'timeline-load-heading');
-            heading.append(element('strong', '', 'Studietakt'), element('span', '',
-                `Genomsnitt: ${number(total / load.length / HP_PER_WEEK * 100)} % — ${number(total)} hp inom terminen`));
-            summary.append(heading, element('p', 'timeline-note', '100 % motsvarar 1,5 hp/vecka. Streckat slut på en stapel betyder att kursen fortsätter efter översiktens terminsgräns.'));
-            for (let i = 0; i < load.length;) {
-                let end = i;
-                while (end + 1 < load.length && Math.abs(load[end + 1] - load[i]) < 0.00001) end++;
-                if (load[i] > 0) {
-                    const row = element('div', 'timeline-load-row');
-                    const percent = load[i] / HP_PER_WEEK * 100;
-                    if (percent > 100.05) row.classList.add('is-overload');
-                    row.append(element('span', '', formatWeekRange(config.start + i, config.start + end, termKey)),
-                        element('span', '', `${number(percent)} % — ${number(load[i])} hp/v`));
-                    summary.append(row);
-                }
-                i = end + 1;
+        renderLoad(termKey, courses, config, load) {
+            const offset = firstWeekIndex(termKey) - 1;
+            const activeWeeks = new Set();
+            for (const course of courses) {
+                for (let week = course.startWeek; week <= course.endWeek; week++) activeWeeks.add(week);
             }
-            return summary;
+            const periods = [];
+            let totalHp = 0;
+            let totalPercent = 0;
+            let peak = 0;
+            let incomplete = false;
+            for (const week of [...activeWeeks].sort((a, b) => a - b)) {
+                const current = load.get(offset + week);
+                const previous = periods.at(-1);
+                if (previous && previous.end + 1 === week && Math.abs(previous.percent - current.percent) < 0.00001
+                    && Math.abs(previous.hp - current.hp) < 0.00001 && previous.unknown === current.unknown) {
+                    previous.end = week;
+                } else periods.push({ start: week, end: week, ...current });
+                if (week >= config.start && week <= config.end) {
+                    totalHp += current.hp;
+                    totalPercent += current.percent;
+                }
+                peak = Math.max(peak, current.percent);
+                incomplete ||= current.unknown;
+            }
+            const overloaded = periods.filter(period => period.percent > 100.05);
+            const warningCount = overloaded.reduce((sum, { start, end }) => sum + end - start + 1, 0);
+            const overview = element('div', `timeline-overview${warningCount ? ' timeline-overview-warning' : ''}`);
+            const headline = warningCount ? `Över heltid i ${warningCount} ${warningCount === 1 ? 'vecka' : 'veckor'}` : 'Högsta belastning';
+            const knownPeak = peak > 0 ? `${incomplete ? 'minst ' : ''}${number(peak)} %` : 'Okänd';
+            overview.append(element('strong', '', headline), element('span', 'timeline-peak', knownPeak));
+            if (warningCount) {
+                const firstRanges = overloaded.slice(0, 2).map(period => formatWeekRange(period.start, period.end, termKey)).join(', ');
+                const remaining = overloaded.length - 2;
+                overview.append(element('span', 'timeline-overview-note', `${firstRanges}${remaining > 0 ? ` och ${remaining} till` : ''}`));
+            } else if (incomplete) {
+                overview.append(element('span', 'timeline-overview-note', 'Studietakt saknas för vissa veckor'));
+            }
+
+            const details = element('details', 'timeline-load');
+            details.id = `timeline-load-${termKey}`;
+            const disclosure = element('summary', '', 'Belastning per vecka');
+            disclosure.id = `timeline-load-toggle-${termKey}`;
+            details.append(disclosure);
+            const length = config.end - config.start + 1;
+            const average = `${number(totalPercent / length)} % · ${number(totalHp)} hp under veckorna i vyn`;
+            details.append(element('p', 'timeline-load-heading', `Genomsnitt i veckovyn: ${incomplete ? 'minst ' : ''}${average}`));
+            const rows = element('ul', 'timeline-load-list');
+            rows.setAttribute('role', 'list');
+            for (const period of periods) {
+                const isOverload = period.percent > 100.05;
+                const row = element('li', `timeline-load-row${isOverload ? ' is-overload' : ''}`);
+                const label = period.unknown && period.percent === 0 ? 'Studietakt saknas'
+                    : `${period.unknown ? 'Minst ' : ''}${number(period.percent)} %${isOverload ? ' · Över heltid' : ''}`;
+                row.append(element('span', '', formatWeekRange(period.start, period.end, termKey)), element('span', '', label));
+                rows.append(row);
+            }
+            details.append(rows);
+            return { overview, details };
         }
     }
 

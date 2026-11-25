@@ -1,50 +1,48 @@
 # Antagning.se Course Timeline
 
-A Chrome/Edge (Manifest V3) extension that keeps a visual course timeline and weekly study-load summary visible while you move between Antagning.se search results, **Mina val**, and other pages.
+An unofficial Chrome and Edge extension for planning courses selected on Antagning.se. The Swedish-language planner shows course weeks, overlapping study periods and estimated weekly workload directly on the site. It is independent of Antagning.se and the Swedish Council for Higher Education (UHR).
 
-## Install or reload
+![Kurstidslinje demo showing three spring courses and ten weeks above full-time study](docs/timeline-preview.jpg)
 
-1. Open `chrome://extensions` (Chrome) or `edge://extensions` (Edge).
-2. Enable **Developer mode** and click **Load unpacked**, selecting this repository folder.
-3. If the extension is already installed from this folder, click **Reload**.
-4. Refresh any open `antagning.se` tabs.
+## Install or reload locally
 
-Click the **Kurstidslinje** bar directly below the site header to expand or collapse the timeline (press `Escape` while expanded to collapse). The bar stays pinned under the header as you scroll. Your expanded/collapsed preference and selected courses are stored per browser origin in `localStorage`.
+1. Download or clone this repository.
+2. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
+3. Turn on **Developer mode**, choose **Load unpacked**, and select the folder containing `manifest.json`. If that folder is already installed, use **Reload** on the extension card.
+4. Refresh Antagning.se and click **Visa planering** below the site header.
 
-## Behavior
+## Plan your courses
 
-- **Current & legacy Antagning.se support**: Reads confirmed selections from Antagning.se's current Angular components (`utsokt-button-contained` / `utsokt-button-outlined`) as well as legacy `button.toggleselection` controls. Ignores favourite toggle buttons (`utsokt-button-favourite`), info popovers, and pending spinner states (`ispending`).
-- **Event-driven synchronization**: Uses `MutationObserver` and browser navigation events (`popstate`, `hashchange`, `pageshow`, `focus`, `navigatesuccess`) with no polling timers or per-card event listeners.
-- **Persistent across pages & tabs**: Keeps off-page selections across searches, filter changes, route transitions, and reloads, and synchronizes open tabs via `storage` events.
-- **Safe reconciliation on Mina val**: Removes a course immediately when its card explicitly changes to unselected. On `/my/selections`, stale cached entries are pruned only once the list finishes loading and its selected-card count matches the page tab counter (or the explicit `.mina-val-emptystate` is shown).
-- **Term-scoped identities**: Identifies courses by `<TERM><YEAR>:<APPLICATION_CODE>` so identical application codes in different terms do not collide.
-- **Self-healing panel**: Restores the panel automatically if the site replaces DOM nodes and guards against duplicate script injection.
+- Use **Lägg till** on Antagning.se to add a course to your plan. Selections follow you between search results, **Mina val**, and other pages. Courses saved only as favourites stay out of the planner.
+- Each term starts with its peak workload and the weeks it goes above full-time study. Open **Belastning per vecka** for the full breakdown, including overlaps across terms.
+- Course rows show the full week range, credits and study pace. **Uppskattat** marks estimated dates. Narrow screens show the same dates and pace in a list.
+- Press **Escape** while focused inside the planner to close it. If its stored course list is stale, use **Läs in kurser på nytt** under **Om veckor och beräkningar**, then visit **Mina val** to refresh the full list.
 
-## Timeline & study load estimates
+Workload is an estimate. For courses worth higher education credits, the planner spreads the credits evenly across the course weeks and treats 1.5 hp per week as full-time study. For preparatory courses measured in fup, it uses the published study pace when available. Read the course information for specific teaching sessions and deadlines.
 
-- Explicit **Startvecka** and **Slutvecka** take priority. Otherwise, **Startperiod** and credits/study pace estimate the course schedule, and estimated rows are labeled **uppskattat**.
-- Supports both `hp` (*högskolepoäng*) and `fup` (*förutbildningspoäng*), as well as intensive courses over 100% pace.
-- Default overview windows: spring (`VT`) weeks 3–22, summer (`ST`) weeks 23–35, and autumn (`HT`) 20 weeks starting week 36 (wrapping into the following year; courses starting in weeks 34–35 stay in the current autumn term).
-- Full-time study pace (`100 %`) corresponds to `1.5 hp/week`. Overlapping weeks above `100 %` and term totals above `45 hp` are highlighted; courses extending outside the term window display striped boundaries.
-- Use **Rensa cache** inside the panel to clear saved off-page courses and re-read the current page.
+## Privacy
 
-## Files
+Course details and the panel preference are stored in the browser's local storage for the Antagning.se site. The extension uses no analytics and makes no network requests of its own. [Privacy policy](PRIVACY.md)
 
-- `manifest.json`: Manifest V3 extension definition (no extra permissions requested).
-- `timeline.js`: Course metadata parsing, validated `localStorage` persistence, synchronization, and timeline/load rendering.
-- `timeline.css`: Scoped styles for the bottom drawer panel.
-- `icons/` & `icon.svg`: Extension icons (`16x16`, `48x48`, `128x128`).
-- `test_dom.js`: Automated `node:test` + `jsdom` regression suite.
-- `antagning.html`: Real saved Antagning.se search page HTML fixture used by tests.
-- `test_comprehensive.html`: Interactive local demonstration page.
+## Development
 
-## Development & testing
-
-Run the automated test suite with Node.js 18 or newer:
+Use Node.js 18 or later.
 
 ```sh
-npm install
+npm ci
 npm test
 ```
 
-To inspect the interactive demonstration locally, serve this directory over HTTP (for example `npx serve .` or `python -m http.server`) and open `test_comprehensive.html`.
+Open `test_comprehensive.html` to try the planner with sample data. **Töm exempelval** resets the demo to its empty state. The automated tests cover both current and legacy course cards, navigation, storage, and workload calculations.
+
+## Publish to the Chrome Web Store
+
+Create a ZIP with `manifest.json` at its root. Include `timeline.js`, `timeline.css` and `icons/`. In PowerShell, run this from the repository folder.
+
+```powershell
+Compress-Archive -Path manifest.json,timeline.js,timeline.css,icons -DestinationPath antagning-course-timeline-1.2.0.zip
+```
+
+Upload the ZIP as a new item in the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/). For an existing listing, upload it as a new package and use a version number higher than every version previously uploaded for that item.
+
+Use the screenshot above for the store listing. The package supplies the 128 × 128 icon. In **Privacy practices**, explain that the extension reads selected course information from Antagning.se pages to display the planner, stores it locally, and runs only the code bundled with the extension. Use the public URL for this repository's [privacy policy](PRIVACY.md). Under **Distribution**, choose visibility and countries, then submit the item for review. [Google's publishing instructions](https://developer.chrome.com/docs/webstore/publish)

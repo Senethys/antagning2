@@ -3,41 +3,57 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Kurstidslinje — navigationstest</title>
+    <title>Kurstidslinje i testmiljö</title>
     <link rel="stylesheet" href="timeline.css">
     <style>
-        body {margin: 0; background: #f1f4f6; color: #263238; font: 16px/1.5 system-ui; padding-bottom: 80px}
-        header {position: sticky; top: 0; z-index: 10000; padding: 18px 30px; background: #173e50; color: white}
-        nav {display:flex; gap:12px; flex-wrap:wrap; margin:20px 0}
-        button {font:inherit; padding:8px 14px; cursor:pointer; border:1px solid #adb8bd; border-radius:5px; background:white}
-        main {max-width:900px; margin:24px auto; padding:0 20px}
-        .searchresultcard {padding:20px; border:1px solid #ccd6da; border-radius:8px; background:white; margin:18px 0}
+        body {margin: 0; background: #f4f6f8; color: #263238; font: 16px/1.5 system-ui; padding-bottom: 80px}
+        header {position: sticky; top: 0; z-index: 10000; background: #173e50; color: white}
+        .site-header {max-width: 1010px; margin: auto; padding: 12px 16px; display:flex; gap:12px; align-items:baseline; flex-wrap:wrap}
+        .site-header strong {font-size: 1.15rem}
+        .site-header span {color:#d8e9ef;font-size:.85rem}
+        main {max-width: 1010px; margin: 24px auto; padding: 0 16px}
+        main nav {display:flex; gap:8px; flex-wrap:wrap; margin:18px 0}
+        main button {font:inherit; min-height:44px; padding:8px 14px; cursor:pointer; border:1px solid #adb8bd; border-radius:6px; color:#173e50; background:white}
+        main button:hover {background:#e6eff3}
+        main button:focus-visible {outline:3px solid #173e50;outline-offset:2px}
+        .searchresultcard {padding:18px; border:1px solid #ccd6da; border-radius:8px; background:white; margin:12px 0}
         .card-header {display:flex; justify-content:space-between; align-items:center; gap:12px}
-        .headline4 {margin:0 0 10px} .subtitle {font-weight:600} .contained-button {background:#dfedf1}
+        .headline4 {margin:0;overflow-wrap:anywhere} .subtitle {font-weight:600} .contained-button {background:#dfedf1}
+        .education-block-tags {margin:8px 0;color:#3b4f58}
+        .course-fixture-action {margin-top:12px}
         .favourite-toggle {border-radius:999px; font-size:14px}
         .sr-only {position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap}
     </style>
 </head>
 <body>
-    <header>Antagning.se — lokal testmiljö</header>
+    <header><div class="site-header"><strong>Antagning.se</strong><span>Lokal testmiljö</span></div></header>
     <main>
-        <h1>Kurstidslinje: navigationstest</h1>
-        <p>Lägg till en kurs, markera som favorit, byt sida, skrolla och ladda om. Öppna panelen direkt under sidhuvudet för att se tidslinjen. Alla val på den här sidan är lokala testdata.</p>
+        <h1 tabindex="-1">Hitta utbildningar</h1>
+        <p>Prova att lägga till eller ta bort en exempelkurs. Tidslinjen uppdateras under sidhuvudet.</p>
         <nav aria-label="Testsidor">
             <button data-page="search">Sökresultat</button><button data-page="selections">Mina val</button>
-            <button data-page="other">Annan sida</button><button id="remove-panel">Återskapa panel</button>
+            <button data-page="other">Annan sida</button><button id="clear-samples">Töm exempelval</button>
+            <button id="remove-panel">Återskapa panel</button>
         </nav>
         <div id="site-content"></div>
     </main>
     <script>
         const samples = [
             {code:'KAU-49454', name:'1700-talslitteratur', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:25, start:3, end:22},
-            {code:'UU-05025', name:'1800-talsromanen', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:50, start:3, end:12},
+            {code:'UU-05025', name:'1800-talsromanen', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:50, start:8, end:17},
             {code:'KTH-91002', name:'Introduktion till datavetenskap', hp:'15', unit:'högskolepoäng', unitShort:'hp', term:'Våren 2027', pace:100, start:3, end:12},
-            {code:'GU-33104', name:'Projekt i miljövetenskap', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Hösten 2027', pace:50, start:46, end:3}
+            {code:'GU-33104', name:'Projekt i miljövetenskap', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Hösten 2027', pace:50, start:46, end:3},
+            {code:'SU-17830', name:'Hållbar stadsutveckling och fysisk planering', hp:'7,5', unit:'högskolepoäng', unitShort:'hp', term:'Hösten 2027', pace:50, period:2},
         ];
-        const selected = new Set(JSON.parse(localStorage.getItem('timelineDemoSelections') || '[]'));
-        const favourites = new Set(JSON.parse(localStorage.getItem('timelineDemoFavourites') || '[]'));
+        function readDemoSetting(key) {
+            try { return localStorage.getItem(key); } catch { return null; }
+        }
+        function saveDemoSetting(key, value) {
+            try { localStorage.setItem(key, value); } catch { /* The local demo can still run. */ }
+        }
+        const selected = new Set(JSON.parse(readDemoSetting('timelineDemoSelections')) ?? samples.map(course => course.code));
+        const favourites = new Set(JSON.parse(readDemoSetting('timelineDemoFavourites') || '[]'));
+        if (readDemoSetting('antagningCourseTimelineExpanded') === null) saveDemoSetting('antagningCourseTimelineExpanded', 'true');
         const content = document.getElementById('site-content');
         function renderCard(course) {
             const chosen = selected.has(course.code);
@@ -50,42 +66,54 @@
                     </utsokt-button-favourite>
                 </div>
                 <div class="education-block-tags">Kurs ${course.hp} ${course.unitShort} Studietakt ${course.pace} %</div>
-                <div><span class="subtitle">Startperiod: </span>${course.term} Period 1</div>
-                <div><span class="subtitle">Startvecka: </span>Vecka ${course.start}</div>
-                <div><span class="subtitle">Slutvecka: </span>Vecka ${course.end}</div>
+                <div><span class="subtitle">Startperiod: </span>${course.term} Period ${course.period ?? 1}</div>
+                ${course.start ? `<div><span class="subtitle">Startvecka: </span>Vecka ${course.start}</div>` : ''}
+                ${course.end ? `<div><span class="subtitle">Slutvecka: </span>Vecka ${course.end}</div>` : ''}
                 <div><span class="subtitle">Studietakt: </span>${course.pace} %</div>
                 <div><span class="subtitle">Omfattning: </span>${course.hp} ${course.unit}</div>
                 <div><span class="subtitle">Anmälningskod: </span>${course.code}</div>
-                <utsokt-button-${chosen ? 'outlined class="remove-button"' : 'contained'}>
+                <div class="course-fixture-action"><utsokt-button-${chosen ? 'outlined class="remove-button"' : 'contained'}>
                     <button data-code="${course.code}" class="${chosen ? 'outlined-button' : 'contained-button'}">${chosen ? 'Ta bort' : 'Lägg till'} ${course.name}</button>
-                </utsokt-button-${chosen ? 'outlined' : 'contained'}></div>`;
+                </utsokt-button-${chosen ? 'outlined' : 'contained'}></div></div>`;
         }
         function renderPage() {
-            const page = new URLSearchParams(location.search).get('page') || 'search';
+            const page = location.hash.slice(1) || 'search';
             if (page === 'other') content.innerHTML = '<h2>Annan sida</h2><p>Inga kurskort visas. Tidslinjen behåller dina kurser.</p>';
             else if (page === 'selections') {
-                content.innerHTML = `<a class="selectionstab" aria-current="page" href="?page=selections">Mina val <span class="dynamic-content">(${selected.size})</span></a>
+                content.innerHTML = `<a class="selectionstab" aria-current="page" href="#selections">Mina val <span class="dynamic-content">(${selected.size})</span></a>
                     <section class="selections-page"><h2>Mina valda utbildningar</h2>${selected.size
                         ? `<div class="selection-cards">${samples.filter(course=>selected.has(course.code)).map(renderCard).join('')}</div>`
                         : '<div class="mina-val-emptystate">Inga valda utbildningar</div>'}</section>`;
             } else content.innerHTML = '<h2>Sökresultat</h2>' + samples.map(renderCard).join('');
         }
+        function goTo(page) {
+            history.pushState({}, '', '#' + page);
+            renderPage();
+        }
         document.addEventListener('click', event => {
+            if (event.target.closest('#timeline-find-courses')) {
+                event.preventDefault();
+                goTo('search');
+                document.querySelector('main h1').focus();
+                return;
+            }
             const button = event.target.closest('button');
             if (button?.dataset.page) {
-                const routes = { search: '/se/search', selections: '/se/my/selections', other: '/se/start' };
-                history.pushState({}, '', routes[button.dataset.page] + '?page=' + button.dataset.page);
-                renderPage();
+                goTo(button.dataset.page);
             } else if (button?.dataset.code) {
                 const code = button.dataset.code;
                 if (selected.has(code)) selected.delete(code); else selected.add(code);
-                localStorage.setItem('timelineDemoSelections', JSON.stringify([...selected]));
+                saveDemoSetting('timelineDemoSelections', JSON.stringify([...selected]));
                 renderPage();
             } else if (button?.dataset.fav) {
                 const code = button.dataset.fav;
                 if (favourites.has(code)) favourites.delete(code); else favourites.add(code);
-                localStorage.setItem('timelineDemoFavourites', JSON.stringify([...favourites]));
+                saveDemoSetting('timelineDemoFavourites', JSON.stringify([...favourites]));
                 renderPage();
+            } else if (button?.id === 'clear-samples') {
+                selected.clear();
+                saveDemoSetting('timelineDemoSelections', '[]');
+                goTo('search');
             } else if (button?.id === 'remove-panel') document.getElementById('course-timelines-container')?.remove();
         });
         window.addEventListener('popstate', renderPage);

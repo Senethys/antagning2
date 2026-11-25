@@ -45,6 +45,7 @@ async function page(t, html = '', cache, url = 'https://www.antagning.se/se/sear
 
 const rows = w => [...w.document.querySelectorAll(`${PANEL} [data-course-id]`)];
 const ids = w => rows(w).map(row => row.dataset.courseId);
+const schedule = row => row.querySelector('.course-schedule').textContent;
 const main = w => w.document.querySelector('main');
 async function until(check) {
     const deadline = Date.now() + 3000;
@@ -64,7 +65,7 @@ const cached = (...courses) => ({ version: 2, courses });
     assert.deepEqual(ids(w), ['VT2027:KAU-49454']);
     assert.match(w.document.querySelector('.timeline-term-header').textContent, /7,5 hp/);
     assert.match(w.document.querySelector('.timeline-load-heading').textContent, /25 %/);
-    assert.doesNotMatch(rows(w)[0].title, /uppskattat/);
+    assert.doesNotMatch(schedule(rows(w)[0]), /uppskattat/);
 });
 
 test('selections survive search filters, other pages, back/forward, and full reload', async t => {
@@ -170,7 +171,7 @@ test('panel removal and entire body replacement restore saved rows and expansion
     assert.equal(w.document.querySelector('#course-timelines-body').hidden, false);
     w.document.body.replaceChildren(w.document.createElement('main'));
     await until(() => assert.equal(rows(w).length, 1));
-    assert.equal(w.document.querySelector('.timeline-count').textContent, '(1 kurs)');
+    assert.equal(w.document.querySelector('.timeline-count').textContent, '1 vald kurs');
     w.eval(source);
     assert.equal(w.document.querySelector('#course-timelines-body').hidden, false);
 });
@@ -212,7 +213,7 @@ test('storage events synchronize another tab without destroying off-page records
 test('cross-year course weeks wrap correctly and explicit dates override period guesses', async t => {
     const w = await page(t, card({ term: 'Hösten 2027', start: 46, end: 3, pace: '50 %' }));
     assert.equal(rows(w).length, 1);
-    assert.match(rows(w)[0].title, /v\.46–3 \(2028\)/);
+    assert.match(schedule(rows(w)[0]), /v\.46–3 \(2028\)/);
     assert.equal(JSON.parse(w.localStorage.getItem(STORAGE)).courses[0].durationWeeks, 10);
     assert.match(w.document.querySelector('.timeline-weeks').textContent, /2028/);
 });
@@ -228,8 +229,8 @@ test('missing term or missing schedule data is not replaced with an invented cur
 test('estimated schedules and summer courses are supported', async t => {
     const w = await page(t, card({ start: null, end: null, pace: 'Halvfart' }) + card({ code: 'SUMMER', term: 'Sommar 2027', start: 23, end: 32 }));
     assert.equal(rows(w).length, 2);
-    assert.match(rows(w)[0].title, /uppskattat/);
-    assert.match(w.document.querySelectorAll('.timeline-term-header')[1].textContent, /ST 2027/);
+    assert.match(schedule(rows(w)[0]), /uppskattat/);
+    assert.match(w.document.querySelectorAll('.timeline-term-header')[1].textContent, /Sommarterminen 2027/);
 });
 
 test('initial zero-count list is a loading state, not a confirmed empty selection', async t => {
@@ -298,8 +299,8 @@ test('favourited cards ("Ta bort favorit") never trigger false selection or bloc
 test('autumn courses starting in week 34 or 35 stay in the current autumn term', async t => {
     const w = await page(t, card({ code: 'EARLY-HT', term: 'Hösten 2027', hp: '16,5', start: 35, end: 45, pace: '100 %' }));
     assert.equal(rows(w).length, 1);
-    assert.match(rows(w)[0].title, /v\.35–45$/);
-    assert.match(w.document.querySelector('.timeline-load-heading').textContent, /50 % — 15 hp inom terminen/);
+    assert.match(schedule(rows(w)[0]), /v\.35–45$/);
+    assert.match(w.document.querySelector('.timeline-load-heading').textContent, /50 % · 15 hp under veckorna i vyn/);
     assert.ok(w.document.querySelector('.course-progress.timeline-underflow'));
 });
 
@@ -307,7 +308,7 @@ test('multi-year programmes wrap week labels across multiple calendar years', as
     const w = await page(t, card({ code: 'BACHELOR', term: 'Våren 2025', hp: '180', pace: '100 %', start: 4, end: null }));
     assert.equal(rows(w).length, 1);
     // 180 hp at 100% = 120 weeks starting v.4 2025 -> endWeek 123 -> 2025 (52w) + 2026 (53w) = 105 -> v.18 (2027)
-    assert.match(rows(w)[0].title, /v\.4–18 \(2027\) \(uppskattat\)/);
+    assert.match(schedule(rows(w)[0]), /v\.4–18 \(2027\) \(uppskattat\)/);
 });
 
 test('fup credits, intensive >100% courses, and English UniversityAdmissions cards are parsed', async t => {
@@ -332,7 +333,7 @@ test('fup credits, intensive >100% courses, and English UniversityAdmissions car
     const w = await page(t, fupCard + intensiveCard + englishCard);
     assert.deepEqual(ids(w), ['VT2027:INT-1', 'VT2027:KTH-BAS1', 'HT2027:UU-EN01']);
     assert.match(w.document.querySelector('[data-course-id="VT2027:KTH-BAS1"]').textContent, /30 fup/);
-    assert.match(w.document.querySelector('[data-course-id="HT2027:UU-EN01"]').title, /v\.35–44$/);
+    assert.match(schedule(w.document.querySelector('[data-course-id="HT2027:UU-EN01"]')), /v\.35–44$/);
 });
 
 test('pending spinner buttons and prerequisite prose percentages do not alter selections', async t => {
@@ -354,7 +355,7 @@ test('chronological sorting, overload highlighting, single-week load, Escape, an
         + card({ code: 'P1', hp: '37,5', pace: '100 %', start: 3, end: 12 }), cached(storedCourse('OFFPAGE', 'HT2027')));
     const vtIds = [...w.document.querySelectorAll('.timeline-term:first-of-type [data-course-id]')].map(r => r.dataset.courseId);
     assert.deepEqual(vtIds, ['VT2027:P1', 'VT2027:P2']);
-    assert.match(w.document.querySelector('.timeline-term-header').textContent, /över 45 hp/);
+    assert.match(w.document.querySelector('.timeline-term-header').textContent, /Över 45 hp/);
     assert.ok(w.document.querySelector('.timeline-load-row.is-overload'));
 
     // Single-week course renders v.3 without duplicate range dash
@@ -369,6 +370,44 @@ test('chronological sorting, overload highlighting, single-week load, Escape, an
     w.document.querySelector('.timeline-toggle').click();
     w.document.querySelector('.timeline-clear').click();
     await until(() => assert.deepEqual(ids(w), ['VT2027:P1', 'VT2027:P2']));
+});
+
+test('workload flags courses crossing into another term in the same ISO week', async t => {
+    const w = await page(t, card({ code: 'AUTUMN', term: 'Hösten 2027', hp: '3', start: 2, end: 3, pace: '100 %' })
+        + card({ code: 'SPRING', term: 'Våren 2028', hp: '1,5', start: 3, end: 3, pace: '100 %' }));
+    const [autumn, spring] = w.document.querySelectorAll('.timeline-overview-warning');
+    assert.match(autumn.textContent, /Över heltid i 1 vecka.*200 %.*v\.3 \(2028\)/);
+    assert.match(spring.textContent, /Över heltid i 1 vecka.*200 %.*v\.3$/);
+});
+
+test('mixed credit types keep their units and report missing fup pace', async t => {
+    const accessCourse = options => card(options).replace('högskolepoäng</div>', 'förutbildningspoäng</div>');
+    const w = await page(t, card({ code: 'HP', hp: '30', pace: '100 %' })
+        + accessCourse({ code: 'FUP', hp: '25', pace: '50 %' })
+        + accessCourse({ code: 'UNKNOWN', hp: '7,5', pace: 'Okänd' }));
+    assert.match(w.document.querySelector('.timeline-term-stats').textContent, /30 hp \+ 32,5 fup/);
+    assert.equal(w.document.querySelector('.timeline-credit-warning'), null);
+    assert.match(w.document.querySelector('.timeline-overview-warning').textContent, /minst 150 %/);
+    assert.match(rows(w).find(row => row.dataset.courseId.endsWith(':UNKNOWN')).textContent, /Studietakt saknas/);
+});
+
+test('term navigation and data updates keep focus and disclosure state', async t => {
+    const w = await page(t, card() + card({ code: 'SUMMER', term: 'Sommar 2027', start: 23, end: 35 }));
+    const toggle = w.document.querySelector('.timeline-toggle');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    toggle.click();
+    w.document.getElementById('timeline-link-VT2027').click();
+    assert.equal(w.document.activeElement.id, 'timeline-term-VT2027');
+    const details = w.document.getElementById('timeline-load-VT2027');
+    details.open = true;
+    details.querySelector('summary').focus();
+    main(w).insertAdjacentHTML('beforeend', card({ code: 'EXTRA' }));
+    await until(() => assert.equal(rows(w).length, 3));
+    assert.equal(w.document.getElementById(details.id).open, true);
+    assert.equal(w.document.activeElement.id, 'timeline-load-toggle-VT2027');
+    w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(w.document.activeElement, toggle);
 });
 
 test('real antagning.html snapshot parses and toggles legacy cards accurately', async t => {
