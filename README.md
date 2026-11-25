@@ -9,7 +9,7 @@ A Chrome/Edge (Manifest V3) extension that keeps a visual course timeline and we
 3. If the extension is already installed from this folder, click **Reload**.
 4. Refresh any open `antagning.se` tabs.
 
-Click the **Kurstidslinje** bar at the bottom of the page to expand or collapse the timeline (press `Escape` while expanded to collapse). Your expanded/collapsed preference and selected courses are stored per browser origin in `localStorage`.
+Click the **Kurstidslinje** bar directly below the site header to expand or collapse the timeline (press `Escape` while expanded to collapse). The bar stays pinned under the header as you scroll. Your expanded/collapsed preference and selected courses are stored per browser origin in `localStorage`.
 
 ## Behavior
 

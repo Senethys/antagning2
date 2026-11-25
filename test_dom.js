@@ -389,4 +389,22 @@ test('real antagning.html snapshot parses and toggles legacy cards accurately', 
         btn.querySelector('.contract-text').classList.remove('hide');
     }
     await until(() => assert.equal(rows(w).length, 4));
+    const header = w.document.querySelector('header');
+    assert.equal(header.nextElementSibling, w.document.querySelector(PANEL));
+});
+
+test('panel mounts directly below site header and updates sticky offset on scroll and late header mount', async t => {
+    const w = await page(t, '');
+    const appRoot = w.document.createElement('app-root');
+    const header = w.document.createElement('huvudmeny-huvudmeny');
+    let bottom = 78;
+    header.getBoundingClientRect = () => ({ top: 0, bottom, height: 78, left: 0, right: 1200, width: 1200 });
+    const mainEl = w.document.createElement('main');
+    appRoot.append(header, mainEl);
+    w.document.body.prepend(appRoot);
+    await until(() => assert.equal(header.nextElementSibling, w.document.querySelector(PANEL)));
+    assert.equal(w.document.querySelector(PANEL).style.getPropertyValue('--timeline-sticky-top'), '78px');
+    bottom = 58;
+    w.dispatchEvent(new w.Event('scroll'));
+    assert.equal(w.document.querySelector(PANEL).style.getPropertyValue('--timeline-sticky-top'), '58px');
 });

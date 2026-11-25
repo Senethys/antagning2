@@ -275,9 +275,12 @@
             this.expanded = this.readValue(PANEL_KEY) === 'true';
             this.timer = null;
             this.root = null;
+            this.header = null;
+            this.headerObserver = null;
             this.storageFailed = false;
             this.sync = this.sync.bind(this);
             this.schedule = this.schedule.bind(this);
+            this.updateStickyOffset = this.updateStickyOffset.bind(this);
         }
 
         readValue(key) {
@@ -299,6 +302,8 @@
             document.addEventListener('click', this.schedule, true);
             document.addEventListener('visibilitychange', this.schedule);
             for (const event of ['popstate', 'hashchange', 'pageshow', 'focus']) window.addEventListener(event, this.schedule);
+            window.addEventListener('scroll', this.updateStickyOffset, { passive: true });
+            window.addEventListener('resize', this.updateStickyOffset, { passive: true });
             window.navigation?.addEventListener('navigatesuccess', this.schedule);
             window.addEventListener('storage', event => {
                 if (event.key === STORAGE_KEY || event.key === null) {
@@ -315,8 +320,45 @@
             this.timer = setTimeout(() => { this.timer = null; this.sync(); }, 100);
         }
 
+        findHeader() {
+            return document.querySelector('huvudmeny-huvudmeny') || document.querySelector('header');
+        }
+
+        updateStickyOffset() {
+            if (!this.root) return;
+            const header = this.header?.isConnected ? this.header : this.findHeader();
+            const bottom = header ? Math.max(0, Number(header.getBoundingClientRect().bottom.toFixed(2))) : 0;
+            this.root.style.setProperty('--timeline-sticky-top', `${bottom}px`);
+        }
+
+        mountPanel() {
+            const header = this.findHeader();
+            if (header && header.parentElement) {
+                if (this.root.previousElementSibling !== header || this.root.parentElement !== header.parentElement) {
+                    header.insertAdjacentElement('afterend', this.root);
+                }
+            } else {
+                const host = document.querySelector('app-root') || document.body;
+                if (host && (this.root.parentElement !== host || host.firstElementChild !== this.root)) {
+                    host.prepend(this.root);
+                }
+            }
+            if (header !== this.header) {
+                this.headerObserver?.disconnect();
+                this.header = header;
+                if (header && typeof ResizeObserver === 'function') {
+                    this.headerObserver = new ResizeObserver(this.updateStickyOffset);
+                    this.headerObserver.observe(header);
+                }
+            }
+            this.updateStickyOffset();
+        }
+
         ensurePanel() {
-            if (this.root?.isConnected && this.body?.isConnected && this.root.contains(this.body)) return;
+            if (this.root?.isConnected && this.body?.isConnected && this.root.contains(this.body)) {
+                this.mountPanel();
+                return;
+            }
             document.getElementById(PANEL_ID)?.remove();
             this.root = element('aside', '', undefined);
             this.root.id = PANEL_ID;
@@ -346,14 +388,15 @@
                 }
             });
             this.root.append(toggle, this.body);
-            document.body.append(this.root);
+            this.header = null;
+            this.mountPanel();
             this.render();
         }
 
         updateToggle() {
             this.toggle.setAttribute('aria-expanded', String(this.expanded));
             this.body.hidden = !this.expanded;
-            this.icon.textContent = this.expanded ? '▾' : '▴';
+            this.icon.textContent = this.expanded ? '▴' : '▾';
             this.summary.textContent = this.courses.size ? `(${this.courses.size} ${this.courses.size === 1 ? 'kurs' : 'kurser'})` : '';
         }
 

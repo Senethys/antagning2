@@ -1,14 +1,15 @@
 /* Keep every rule scoped to the extension panel. */
 #course-timelines-container {
-    position: fixed;
-    inset: auto 0 0;
-    z-index: 2147483647;
+    position: sticky;
+    top: var(--timeline-sticky-top, 0px);
+    z-index: 9999;
+    flex: 0 0 auto;
+    width: 100%;
     color: #263238;
     background: #f8f8f8;
-    border-top: 1px solid #d6d6d6;
-    box-shadow: 0 -2px 8px #0002;
+    border-bottom: 1px solid #d6d6d6;
+    box-shadow: 0 2px 6px #0001;
     font: 14px/1.5 'Open Sans', Helvetica, Arial, sans-serif;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 #course-timelines-container *, #course-timelines-container *::before,
 #course-timelines-container *::after { box-sizing: border-box; }
@@ -19,7 +20,7 @@
     gap: 10px;
     width: 100%;
     border: 0;
-    padding: 12px 20px;
+    padding: 10px 20px;
     margin: 0;
     background: transparent;
     color: inherit;
@@ -27,16 +28,33 @@
     text-align: left;
     cursor: pointer;
 }
+#course-timelines-container .timeline-toggle:hover { background: #eff3f5; }
 #course-timelines-container .timeline-toggle:focus-visible,
 #course-timelines-container .timeline-clear:focus-visible { outline: 3px solid #176b96; outline-offset: -3px; }
 #course-timelines-container .timeline-title { font-weight: 600; }
 #course-timelines-container .timeline-count { color: #555; }
 #course-timelines-container .timeline-toggle-icon { margin-left: auto; }
 #course-timelines-container .timeline-body {
-    max-height: min(55vh, 420px);
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: calc(100vh - var(--timeline-sticky-top, 0px) - 56px);
     overflow: auto;
-    padding: 0 20px 16px;
+    padding: 8px 20px 16px;
+    background: #f8f8f8;
+    border-top: 1px solid #e0e0e0;
+    border-bottom: 1px solid #d6d6d6;
+    box-shadow: 0 6px 16px #0003;
     overscroll-behavior: contain;
+}
+@media screen and (min-width: 63rem) {
+    #course-timelines-container .timeline-toggle {
+        padding-inline: max(20px, calc((100% - 60rem) / 2));
+    }
+    #course-timelines-container .timeline-body {
+        padding-inline: max(20px, calc((100% - 60rem) / 2));
+    }
 }
 #course-timelines-container .timeline-empty { margin: 8px 0; }
 #course-timelines-container .timeline-toolbar {
@@ -106,5 +124,5 @@
 #course-timelines-container .timeline-load-row.is-overload { background: #fff3e0; color: #bf360c; font-weight: 600; }
 @media (max-width: 600px) {
     #course-timelines-container .timeline-toggle { padding: 10px 12px; }
-    #course-timelines-container .timeline-body { padding: 0 12px 12px; }
+    #course-timelines-container .timeline-body { padding: 8px 12px 12px; }
 }

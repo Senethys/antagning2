@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="timeline.css">
     <style>
         body {margin: 0; background: #f1f4f6; color: #263238; font: 16px/1.5 system-ui; padding-bottom: 80px}
-        header {padding: 18px 30px; background: #173e50; color: white}
+        header {position: sticky; top: 0; z-index: 10000; padding: 18px 30px; background: #173e50; color: white}
         nav {display:flex; gap:12px; flex-wrap:wrap; margin:20px 0}
         button {font:inherit; padding:8px 14px; cursor:pointer; border:1px solid #adb8bd; border-radius:5px; background:white}
         main {max-width:900px; margin:24px auto; padding:0 20px}
@@ -22,7 +22,7 @@
     <header>Antagning.se — lokal testmiljö</header>
     <main>
         <h1>Kurstidslinje: navigationstest</h1>
-        <p>Lägg till en kurs, markera som favorit, byt sida och ladda om. Öppna panelen längst ned för att se tidslinjen. Alla val på den här sidan är lokala testdata.</p>
+        <p>Lägg till en kurs, markera som favorit, byt sida, skrolla och ladda om. Öppna panelen direkt under sidhuvudet för att se tidslinjen. Alla val på den här sidan är lokala testdata.</p>
         <nav aria-label="Testsidor">
             <button data-page="search">Sökresultat</button><button data-page="selections">Mina val</button>
             <button data-page="other">Annan sida</button><button id="remove-panel">Återskapa panel</button>
